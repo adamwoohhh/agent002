@@ -6,7 +6,12 @@
   "scripts": {
     "dev": "node --import tsx src/index.ts",
     "start": "node --import tsx src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:unit && npm run test:agent",
+    "test:unit": "node --import tsx --test tests/unit/**/*.test.ts",
+    "test:agent": "node --import tsx --test tests/agent/**/*.test.ts",
+    "eval:llm": "node --import tsx --test tests/llm/**/*.test.ts",
+    "eval": "npm run test && npm run eval:llm"
   },
   "dependencies": {
     "@langchain/core": "^1.0.1",
