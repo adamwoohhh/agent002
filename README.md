@@ -2,7 +2,7 @@
 
 这是一个用 LangGraph Graph API 实现的最小“数学计算 agent”示例。
 
-它接受自然语言输入，先通过 OpenAI SDK 调用 LLM 做结构化意图识别，再返回加减乘除的计算结果。
+它接受自然语言输入，通过 OpenAI SDK 的 tool calling 能力，让 LLM 在 4 个数学工具里选择合适的一个，再返回加减乘除的计算结果。
 
 参考资料：
 
@@ -55,19 +55,24 @@ START -> collectInput -> parseIntent -> runCalculation -> formatAnswer -> END
 
 ## LLM 接入方式
 
-`parseIntent` 节点使用 OpenAI 官方 JavaScript SDK，并通过结构化输出把模型结果约束成固定 schema：
+`parseIntent` 节点使用 OpenAI 官方 JavaScript SDK 的 function tool calling 能力。当前项目把四则运算封装成了 4 个工具：
 
-- `canSolve`
-- `operation`
-- `leftOperand`
-- `rightOperand`
-- `reason`
+- `add`
+- `subtract`
+- `multiply`
+- `divide`
+
+模型收到自然语言后会：
+
+1. 判断是否属于“两个数字的一次加减乘除”
+2. 如果可以处理，必须选择一个工具并传入 `left` 和 `right`
+3. 如果不能处理，则直接返回不支持的说明
 
 这样做的好处是：
 
-- 比自由文本更稳定
-- 后续计算节点不需要解析模型自然语言
-- 失败场景可以统一处理
+- 运算能力以工具形式暴露，更符合 agent 的扩展方向
+- 模型不需要直接输出结构化意图 schema，而是直接做工具选择
+- 后续可以继续增加更多工具，而不是不断扩展解析逻辑
 
 ## 支持范围
 
@@ -90,5 +95,5 @@ START -> collectInput -> parseIntent -> runCalculation -> formatAnswer -> END
 
 1. 增加条件边，区分成功、无法识别、模型异常
 2. 支持多步表达式，比如“先加再乘”
-3. 让模型直接产出解释过程
+3. 让模型在拿到工具结果后继续生成自然语言解释
 4. 接入持久化和对话记忆

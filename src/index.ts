@@ -9,7 +9,6 @@ import {
 } from "@langchain/langgraph";
 import { config as loadEnv } from "dotenv";
 import OpenAI from "openai";
-import { zodTextFormat } from "openai/helpers/zod";
 import * as z from "zod";
 
 // 加载环境变量
@@ -31,13 +30,73 @@ const MathAgentState = new StateSchema({
 
 type Operation = "add" | "subtract" | "multiply" | "divide";
 
-const IntentSchema = z.object({
-  canSolve: z.boolean(),
-  operation: z.enum(["add", "subtract", "multiply", "divide"]),
-  leftOperand: z.number(),
-  rightOperand: z.number(),
-  reason: z.string(),
+const BinaryOperationArgsSchema = z.object({
+  left: z.number(),
+  right: z.number(),
 });
+
+const TOOL_NAME_TO_OPERATION: Record<Operation, Operation> = {
+  add: "add",
+  subtract: "subtract",
+  multiply: "multiply",
+  divide: "divide",
+};
+
+const TOOL_SYMBOL_MAP: Record<Operation, string> = {
+  add: "+",
+  subtract: "-",
+  multiply: "*",
+  divide: "/",
+};
+
+// 工具的入参描述
+const toolParameterSchema = {
+  type: "object",
+  properties: {
+    left: {
+      type: "number",
+      description: "按用户原始表达顺序提取的第一个数字，例如“10 除以 2”里的 10",
+    },
+    right: {
+      type: "number",
+      description: "按用户原始表达顺序提取的第二个数字，例如“10 除以 2”里的 2",
+    },
+  },
+  required: ["left", "right"],
+  additionalProperties: false,
+} as const;
+
+// 工具列表，让模型选择使用哪个工具来计算，并传入参数
+const mathTools = [
+  {
+    type: "function" as const,
+    name: "add",
+    description: "对两个数字做加法",
+    parameters: toolParameterSchema,
+    strict: true,
+  },
+  {
+    type: "function" as const,
+    name: "subtract",
+    description: "对两个数字做减法",
+    parameters: toolParameterSchema,
+    strict: true,
+  },
+  {
+    type: "function" as const,
+    name: "multiply",
+    description: "对两个数字做乘法",
+    parameters: toolParameterSchema,
+    strict: true,
+  },
+  {
+    type: "function" as const,
+    name: "divide",
+    description: "对两个数字做除法",
+    parameters: toolParameterSchema,
+    strict: true,
+  },
+];
 
 function normalizeInput(input: string): string {
   return input
@@ -57,17 +116,50 @@ function normalizeInput(input: string): string {
     .replace(/divided by/gi, "除");
 }
 
-/**
- * 从用户输入中提取数学计算意图。
- * @param input 用户输入的自然语言
- * @returns 包含意图的结构化结果
- */
-async function detectIntentWithLLM(input: string) {
+function add(left: number, right: number): number {
+  return left + right;
+}
+
+function subtract(left: number, right: number): number {
+  return left - right;
+}
+
+function multiply(left: number, right: number): number {
+  return left * right;
+}
+
+function divide(left: number, right: number): number {
+  if (right === 0) {
+    throw new Error("除数不能为 0");
+  }
+
+  return left / right;
+}
+
+const toolImplementations: Record<Operation, (left: number, right: number) => number> = {
+  add,
+  subtract,
+  multiply,
+  divide,
+};
+
+type MathToolDecision =
+  | {
+      canSolve: true;
+      operation: Operation;
+      operands: [number, number];
+    }
+  | {
+      canSolve: false;
+      reason: string;
+    };
+
+async function chooseMathToolWithLLM(input: string): Promise<MathToolDecision> {
   if (!openai) {
     throw new Error("缺少 OPENAI_API_KEY，无法调用 OpenAI 模型。");
   }
 
-  const response = await openai.responses.parse({
+  const response = await openai.responses.create({
     model,
     input: [
       {
@@ -76,12 +168,13 @@ async function detectIntentWithLLM(input: string) {
           {
             type: "input_text",
             text: [
-              "你是一个数学计算意图识别器。",
-              "你的任务是从用户自然语言中提取一次四则运算。",
-              "只处理两个数字的一次加减乘除。",
-              "如果用户输入不满足要求，也必须返回完整 schema，并把 canSolve 设为 false。",
-              "当 canSolve 为 false 时，operation 使用 add，leftOperand 和 rightOperand 使用 0，并在 reason 里解释原因。",
-              "不要自己计算最终结果，只做意图识别。",
+              "你是一个数学计算助手。",
+              "你只支持两个数字的一次加减乘除。",
+              "当用户的问题可以通过工具完成时，必须调用且只调用一个工具。",
+              "不要自己心算，不要直接输出答案。",
+              "传参时必须严格保持用户表达中的数字顺序，绝对不能交换左右参数。",
+              "例如“10 减 3”必须传 subtract(left=10, right=3)；“10 除以 2”必须传 divide(left=10, right=2)。",
+              "如果问题不属于两个数字的一次加减乘除，就直接用中文简短说明原因。",
             ].join(" "),
           },
         ],
@@ -91,34 +184,40 @@ async function detectIntentWithLLM(input: string) {
         content: [{ type: "input_text", text: input }],
       },
     ],
-    text: {
-      format: zodTextFormat(IntentSchema, "math_intent"),
-    },
+    tools: mathTools,
   });
 
-  if (response.output_parsed) {
-    return response.output_parsed;
+  const functionCall = response.output.find((item) => item.type === "function_call");
+  if (!functionCall || !("name" in functionCall) || !("arguments" in functionCall)) {
+    return {
+      canSolve: false,
+      reason:
+        response.output_text ||
+        "暂时只支持两个数字的一次加减乘除，例如：12 加 8、50 减 6、7 乘 9、20 除以 5。",
+    };
   }
 
-  throw new Error("模型没有返回可解析的结构化结果。");
-}
-
-function calculate(operation: Operation, operands: number[]): number {
-  const [left, right] = operands;
-
-  switch (operation) {
-    case "add":
-      return left + right;
-    case "subtract":
-      return left - right;
-    case "multiply":
-      return left * right;
-    case "divide":
-      if (right === 0) {
-        throw new Error("除数不能为 0");
-      }
-      return left / right;
+  const parsedArgs = BinaryOperationArgsSchema.safeParse(JSON.parse(functionCall.arguments));
+  if (!parsedArgs.success) {
+    return {
+      canSolve: false,
+      reason: "模型调用工具时传入了无效参数。",
+    };
   }
+
+  const operation = TOOL_NAME_TO_OPERATION[functionCall.name as Operation];
+  if (!operation) {
+    return {
+      canSolve: false,
+      reason: `模型选择了未知工具：${functionCall.name}`,
+    };
+  }
+
+  return {
+    canSolve: true,
+    operation,
+    operands: [parsedArgs.data.left, parsedArgs.data.right] as [number, number],
+  };
 }
 
 const collectInput: GraphNode<typeof MathAgentState> = (state) => {
@@ -130,24 +229,24 @@ const collectInput: GraphNode<typeof MathAgentState> = (state) => {
 
 const parseIntent: GraphNode<typeof MathAgentState> = async (state) => {
   try {
-    const intent = await detectIntentWithLLM(state.normalizedInput);
+    const toolDecision = await chooseMathToolWithLLM(state.normalizedInput);
 
-    if (!intent.canSolve) {
+    if (!toolDecision.canSolve) {
       return {
         operation: null,
         operands: [],
-        messages: [new AIMessage(`模型判断当前输入不在支持范围内：${intent.reason}`)],
+        messages: [new AIMessage(`模型未调用数学工具：${toolDecision.reason}`)],
         finalAnswer:
           "暂时只支持两个数字的一次加减乘除，例如：`12 加 8`、`50 减 6`、`7 乘 9`、`20 除以 5`。",
       };
     }
 
     return {
-      operation: intent.operation,
-      operands: [intent.leftOperand, intent.rightOperand],
+      operation: toolDecision.operation,
+      operands: toolDecision.operands,
       messages: [
         new AIMessage(
-          `已通过 LLM 识别运算：${intent.operation}，操作数：${intent.leftOperand}, ${intent.rightOperand}`,
+          `LLM 已选择工具：${toolDecision.operation}，参数：${toolDecision.operands[0]}, ${toolDecision.operands[1]}`,
         ),
       ],
     };
@@ -168,10 +267,11 @@ const runCalculation: GraphNode<typeof MathAgentState> = (state) => {
   }
 
   try {
-    const result = calculate(state.operation, state.operands);
+    const [left, right] = state.operands;
+    const result = toolImplementations[state.operation](left, right);
     return {
       result,
-      messages: [new AIMessage(`计算完成，结果是 ${result}`)],
+      messages: [new AIMessage(`工具 ${state.operation} 执行完成，结果是 ${result}`)],
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "计算失败";
@@ -190,14 +290,7 @@ const formatAnswer: GraphNode<typeof MathAgentState> = (state) => {
   }
 
   const [left, right] = state.operands;
-  const symbolMap: Record<Operation, string> = {
-    add: "+",
-    subtract: "-",
-    multiply: "*",
-    divide: "/",
-  };
-
-  const finalAnswer = `${left} ${symbolMap[state.operation as Operation]} ${right} = ${state.result}`;
+  const finalAnswer = `${left} ${TOOL_SYMBOL_MAP[state.operation as Operation]} ${right} = ${state.result}`;
 
   return {
     finalAnswer,
