@@ -9,6 +9,7 @@ import {
 } from "@langchain/langgraph";
 import * as z from "zod";
 
+import { JsonlRunLogger } from "./logging/jsonl-run-logger.js";
 import type { MathModelProvider } from "./llm/types.js";
 import {
   normalizeInput,
@@ -28,6 +29,8 @@ const MathAgentState = new StateSchema({
 });
 
 export async function runMathAgent(input: string, provider: MathModelProvider): Promise<string> {
+  const logger = await JsonlRunLogger.create();
+
   const collectInput: GraphNode<typeof MathAgentState> = (state) => {
     return {
       normalizedInput: normalizeInput(state.userInput),
@@ -118,7 +121,7 @@ export async function runMathAgent(input: string, provider: MathModelProvider): 
     .addEdge("formatAnswer", END)
     .compile();
 
-  const result = await graph.invoke({
+  const initialState = {
     messages: [new HumanMessage(input)],
     userInput: input,
     normalizedInput: "",
@@ -126,7 +129,59 @@ export async function runMathAgent(input: string, provider: MathModelProvider): 
     operands: [],
     result: null,
     finalAnswer: "",
+  };
+
+  await logger.write({
+    type: "run_started",
+    timestamp: new Date().toISOString(),
+    runId: logger.runId,
+    input,
+    initialState,
   });
 
-  return result.finalAnswer;
+  let finalState: typeof initialState | null = null;
+
+  try {
+    const stream = await graph.stream(initialState, {
+      streamMode: ["values", "updates", "tasks", "checkpoints", "debug"],
+      debug: true,
+    });
+
+    for await (const chunk of stream) {
+      const [mode, payload] = chunk as [string, unknown];
+
+      await logger.write({
+        type: "graph_event",
+        timestamp: new Date().toISOString(),
+        runId: logger.runId,
+        mode,
+        payload,
+      });
+
+      if (mode === "values") {
+        finalState = payload as typeof initialState;
+      }
+    }
+  } catch (error) {
+    await logger.write({
+      type: "run_failed",
+      timestamp: new Date().toISOString(),
+      runId: logger.runId,
+      error,
+    });
+    throw error;
+  }
+
+  if (!finalState) {
+    throw new Error("LangGraph 未返回最终状态，无法生成结果。");
+  }
+
+  await logger.write({
+    type: "run_completed",
+    timestamp: new Date().toISOString(),
+    runId: logger.runId,
+    finalState,
+  });
+
+  return finalState.finalAnswer;
 }

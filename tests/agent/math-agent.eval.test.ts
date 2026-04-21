@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, readdir, readFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 import { runMathAgent } from "../../src/agent.js";
 import type { MathModelProvider } from "../../src/llm/types.js";
@@ -13,6 +16,26 @@ class StubProvider implements MathModelProvider {
   async chooseMathTool(input: string): Promise<MathToolDecision> {
     return this.decide(input);
   }
+}
+
+type EnvSnapshot = NodeJS.ProcessEnv;
+
+function withEnv(overrides: Record<string, string | undefined>, fn: () => Promise<void> | void) {
+  const originalEnv: EnvSnapshot = { ...process.env };
+
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      process.env = originalEnv;
+    });
 }
 
 type AgentEvalCase =
@@ -107,4 +130,40 @@ test("agent evals: core math capabilities stay stable", async (t) => {
       }
     });
   }
+});
+
+test("agent writes node execution details to one jsonl file per run", async () => {
+  const logDir = await mkdtemp(path.join(os.tmpdir(), "agent002-run-logs-"));
+
+  await withEnv(
+    {
+      AGX_LOG_DIR: logDir,
+    },
+    async () => {
+      const provider = new StubProvider(() => ({
+        canSolve: true,
+        operation: "add",
+        operands: [12, 8],
+      }));
+
+      const result = await runMathAgent("请帮我算一下 12 加 8", provider);
+      assert.equal(result, "12 + 8 = 20");
+
+      const files = await readdir(logDir);
+      assert.equal(files.length, 1);
+      assert.match(files[0], /^math-agent-run-.*\.jsonl$/);
+
+      const logFilePath = path.join(logDir, files[0]);
+      const logLines = (await readFile(logFilePath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+
+      assert.equal(logLines[0].type, "run_started");
+      assert.equal(logLines.at(-1)?.type, "run_completed");
+      assert.ok(logLines.some((line) => line.type === "graph_event" && line.mode === "tasks"));
+      assert.ok(logLines.some((line) => line.type === "graph_event" && line.mode === "debug"));
+      assert.ok(logLines.some((line) => line.type === "graph_event" && line.mode === "values"));
+    },
+  );
 });
