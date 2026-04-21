@@ -8,6 +8,7 @@ import {
   StateSchema,
 } from "@langchain/langgraph";
 import * as z from "zod";
+import { FornaxCallbackHandler } from "@next-ai/fornax-langchain";
 
 import { JsonlRunLogger } from "./logging/jsonl-run-logger.js";
 import type { MathModelProvider } from "./llm/types.js";
@@ -30,6 +31,13 @@ const MathAgentState = new StateSchema({
 
 export async function runMathAgent(input: string, provider: MathModelProvider): Promise<string> {
   const logger = await JsonlRunLogger.create();
+
+  const fornaxCallbackHandler = new FornaxCallbackHandler({
+    spanExporter: {
+      ak: process.env.FORNAX_AK as string,
+      sk: process.env.FORNAX_SK as string,
+    }
+  });
 
   const collectInput: GraphNode<typeof MathAgentState> = (state) => {
     return {
@@ -145,6 +153,7 @@ export async function runMathAgent(input: string, provider: MathModelProvider): 
     const stream = await graph.stream(initialState, {
       streamMode: ["values", "updates", "tasks", "checkpoints", "debug"],
       debug: true,
+      callbacks: [fornaxCallbackHandler],
     });
 
     for await (const chunk of stream) {

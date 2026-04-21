@@ -46,6 +46,10 @@ export class HttpChatCompletionsProvider implements MathModelProvider {
     this.model = process.env.AGX_HTTP_MODEL?.trim() || process.env.AGX_MODEL?.trim() || "gpt-4.1";
     this.timeoutMs = Number(process.env.AGX_HTTP_TIMEOUT_MS?.trim() || "30000");
 
+    if (!this.endpoint) {
+      throw new Error("缺少 AGX_HTTP_URL，无法初始化 http provider。");
+    }
+
     if (!this.apiKey) {
       throw new Error("缺少 AGX_HTTP_API_KEY，且未回退到 AGX_API_KEY，无法初始化 http provider。");
     }
@@ -148,7 +152,7 @@ function resolveHttpProviderEndpoint(): string {
 
   const baseUrl = process.env.AGX_BASE_URL?.trim();
   if (!baseUrl) {
-    return "https://api.openai.com/v1/chat/completions";
+    return "";
   }
 
   const normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
