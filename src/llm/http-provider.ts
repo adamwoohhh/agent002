@@ -6,7 +6,7 @@ import {
   type MathToolDecision,
   type Operation,
 } from "../math.js";
-import type { MathModelProvider } from "./types.js";
+import { buildConversationPrompt, type ConversationMessage, type MathModelProvider } from "./types.js";
 
 type HttpCompatibleTool = {
   type: "function";
@@ -55,7 +55,9 @@ export class HttpChatCompletionsProvider implements MathModelProvider {
     }
   }
 
-  async chooseMathTool(input: string): Promise<MathToolDecision> {
+  async chooseMathTool(input: string, history: ConversationMessage[] = []): Promise<MathToolDecision> {
+    const prompt = buildConversationPrompt(input, history);
+
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), this.timeoutMs);
 
@@ -76,7 +78,7 @@ export class HttpChatCompletionsProvider implements MathModelProvider {
             },
             {
               role: "user",
-              content: input,
+              content: prompt,
             },
           ],
           tools: createMathTools().map<HttpCompatibleTool>((tool) => ({

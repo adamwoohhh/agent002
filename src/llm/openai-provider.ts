@@ -8,7 +8,7 @@ import {
   type MathToolDecision,
   type Operation,
 } from "../math.js";
-import type { MathModelProvider } from "./types.js";
+import { buildConversationPrompt, type ConversationMessage, type MathModelProvider } from "./types.js";
 
 export class OpenAIResponsesProvider implements MathModelProvider {
   private readonly client: OpenAI;
@@ -27,7 +27,9 @@ export class OpenAIResponsesProvider implements MathModelProvider {
     this.model = process.env.AGX_MODEL?.trim() || "gpt-4.1";
   }
 
-  async chooseMathTool(input: string): Promise<MathToolDecision> {
+  async chooseMathTool(input: string, history: ConversationMessage[] = []): Promise<MathToolDecision> {
+    const prompt = buildConversationPrompt(input, history);
+
     const response = await this.client.responses.create({
       model: this.model,
       input: [
@@ -37,7 +39,7 @@ export class OpenAIResponsesProvider implements MathModelProvider {
         },
         {
           role: "user",
-          content: [{ type: "input_text", text: input }],
+          content: [{ type: "input_text", text: prompt }],
         },
       ],
       tools: createMathTools(),

@@ -72,10 +72,25 @@ CLI 参数会覆盖环境变量，支持这几个选项：
 npm run dev -- --provider=http --http-timeout-ms=10000 "请帮我算一下 18 除以 3"
 ```
 
-运行时需要传入一句自然语言：
+运行时如果传入一句自然语言，会执行单轮计算：
 
 ```bash
 npm run dev -- "请帮我算一下 18 除以 3"
+```
+
+如果不传输入，会进入交互式多轮模式：
+
+```bash
+npm run dev
+```
+
+示例：
+
+```text
+你> 12 加 8
+助手> 12 + 8 = 20
+你> 结果再乘 2
+助手> 20 * 2 = 40
 ```
 
 ## 测试分层
@@ -170,6 +185,7 @@ START -> collectInput -> parseIntent -> runCalculation -> formatAnswer -> END
 - 两个数字
 - 一次运算
 - 加、减、乘、除
+- 基于对话历史续算上一轮结果
 
 例如：
 
@@ -177,6 +193,8 @@ START -> collectInput -> parseIntent -> runCalculation -> formatAnswer -> END
 - `50 减 6`
 - `7 * 9`
 - `20 / 5`
+- `结果再乘 2`
+- `上一次结果除以 4`
 
 ## 下一步可以怎么扩展
 

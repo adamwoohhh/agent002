@@ -4,17 +4,20 @@ import { mkdtemp, readdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { runMathAgent } from "../../src/agent.js";
-import type { MathModelProvider } from "../../src/llm/types.js";
+import { MathChatSession, runMathAgent } from "../../src/agent.js";
+import type { ConversationMessage, MathModelProvider } from "../../src/llm/types.js";
 import type { MathToolDecision } from "../../src/math.js";
 
 class StubProvider implements MathModelProvider {
   constructor(
-    private readonly decide: (input: string) => Promise<MathToolDecision> | MathToolDecision,
+    private readonly decide: (
+      input: string,
+      history: ConversationMessage[],
+    ) => Promise<MathToolDecision> | MathToolDecision,
   ) {}
 
-  async chooseMathTool(input: string): Promise<MathToolDecision> {
-    return this.decide(input);
+  async chooseMathTool(input: string, history: ConversationMessage[] = []): Promise<MathToolDecision> {
+    return this.decide(input, history);
   }
 }
 
@@ -130,6 +133,42 @@ test("agent evals: core math capabilities stay stable", async (t) => {
       }
     });
   }
+});
+
+test("chat session carries history across turns for follow-up calculations", async () => {
+  const seenHistories: ConversationMessage[][] = [];
+  const provider = new StubProvider((input, history) => {
+    seenHistories.push(history.map((message) => ({ ...message })));
+
+    if (input === "12 加 8") {
+      return { canSolve: true, operation: "add", operands: [12, 8] };
+    }
+
+    if (input === "结果再乘 2") {
+      return { canSolve: true, operation: "multiply", operands: [20, 2] };
+    }
+
+    throw new Error(`unexpected input: ${input}`);
+  });
+
+  const session = new MathChatSession(provider);
+
+  const firstReply = await session.respond("12 加 8");
+  const secondReply = await session.respond("结果再乘 2");
+
+  assert.equal(firstReply, "12 + 8 = 20");
+  assert.equal(secondReply, "20 * 2 = 40");
+  assert.deepEqual(seenHistories[0], []);
+  assert.deepEqual(seenHistories[1], [
+    { role: "user", content: "12 加 8" },
+    { role: "assistant", content: "12 + 8 = 20" },
+  ]);
+  assert.deepEqual(session.getHistory(), [
+    { role: "user", content: "12 加 8" },
+    { role: "assistant", content: "12 + 8 = 20" },
+    { role: "user", content: "结果再乘 2" },
+    { role: "assistant", content: "20 * 2 = 40" },
+  ]);
 });
 
 test("agent writes node execution details to one jsonl file per run", async () => {

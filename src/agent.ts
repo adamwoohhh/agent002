@@ -11,7 +11,7 @@ import * as z from "zod";
 import { FornaxCallbackHandler } from "@next-ai/fornax-langchain";
 
 import { JsonlRunLogger } from "./logging/jsonl-run-logger.js";
-import type { MathModelProvider } from "./llm/types.js";
+import type { ConversationMessage, MathModelProvider } from "./llm/types.js";
 import {
   normalizeInput,
   TOOL_SYMBOL_MAP,
@@ -29,15 +29,13 @@ const MathAgentState = new StateSchema({
   finalAnswer: z.string(),
 });
 
-export async function runMathAgent(input: string, provider: MathModelProvider): Promise<string> {
+export async function runMathAgent(
+  input: string,
+  provider: MathModelProvider,
+  history: ConversationMessage[] = [],
+): Promise<string> {
   const logger = await JsonlRunLogger.create();
-
-  const fornaxCallbackHandler = new FornaxCallbackHandler({
-    spanExporter: {
-      ak: process.env.FORNAX_AK as string,
-      sk: process.env.FORNAX_SK as string,
-    }
-  });
+  const callbacks = createCallbacks();
 
   const collectInput: GraphNode<typeof MathAgentState> = (state) => {
     return {
@@ -48,7 +46,7 @@ export async function runMathAgent(input: string, provider: MathModelProvider): 
 
   const parseIntent: GraphNode<typeof MathAgentState> = async (state) => {
     try {
-      const toolDecision = await provider.chooseMathTool(state.normalizedInput);
+      const toolDecision = await provider.chooseMathTool(state.normalizedInput, history);
 
       if (!toolDecision.canSolve) {
         return {
@@ -153,7 +151,7 @@ export async function runMathAgent(input: string, provider: MathModelProvider): 
     const stream = await graph.stream(initialState, {
       streamMode: ["values", "updates", "tasks", "checkpoints", "debug"],
       debug: true,
-      callbacks: [fornaxCallbackHandler],
+      callbacks,
     });
 
     for await (const chunk of stream) {
@@ -193,4 +191,49 @@ export async function runMathAgent(input: string, provider: MathModelProvider): 
   });
 
   return finalState.finalAnswer;
+}
+
+export class MathChatSession {
+  private readonly history: ConversationMessage[] = [];
+
+  constructor(private readonly provider: MathModelProvider) {}
+
+  async respond(input: string): Promise<string> {
+    const finalAnswer = await runMathAgent(input, this.provider, this.history);
+
+    this.history.push(
+      {
+        role: "user",
+        content: input,
+      },
+      {
+        role: "assistant",
+        content: finalAnswer,
+      },
+    );
+
+    return finalAnswer;
+  }
+
+  getHistory(): ConversationMessage[] {
+    return [...this.history];
+  }
+}
+
+function createCallbacks() {
+  const ak = process.env.FORNAX_AK?.trim();
+  const sk = process.env.FORNAX_SK?.trim();
+
+  if (!ak || !sk) {
+    return [];
+  }
+
+  return [
+    new FornaxCallbackHandler({
+      spanExporter: {
+        ak,
+        sk,
+      },
+    }),
+  ];
 }
