@@ -1,12 +1,4 @@
-import {
-  BinaryOperationArgsSchema,
-  createMathTools,
-  mathToolSystemPrompt,
-  TOOL_NAME_TO_OPERATION,
-  type MathToolDecision,
-  type Operation,
-} from "../math.js";
-import { buildConversationPrompt, type ConversationMessage, type MathModelProvider } from "./types.js";
+import type { MathModelProvider, ModelMessage, ModelResponse, ModelTool } from "./types.js";
 
 type HttpCompatibleTool = {
   type: "function";
@@ -55,9 +47,10 @@ export class HttpChatCompletionsProvider implements MathModelProvider {
     }
   }
 
-  async chooseMathTool(input: string, history: ConversationMessage[] = []): Promise<MathToolDecision> {
-    const prompt = buildConversationPrompt(input, history);
-
+  async generate(params: {
+    messages: ModelMessage[];
+    tools?: ModelTool[];
+  }): Promise<ModelResponse> {
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), this.timeoutMs);
 
@@ -71,17 +64,8 @@ export class HttpChatCompletionsProvider implements MathModelProvider {
         body: JSON.stringify({
           stream: false,
           model: this.model,
-          messages: [
-            {
-              role: "system",
-              content: mathToolSystemPrompt,
-            },
-            {
-              role: "user",
-              content: prompt,
-            },
-          ],
-          tools: createMathTools().map<HttpCompatibleTool>((tool) => ({
+          messages: params.messages,
+          tools: params.tools?.map<HttpCompatibleTool>((tool) => ({
             type: "function",
             function: {
               name: tool.name,
@@ -90,7 +74,7 @@ export class HttpChatCompletionsProvider implements MathModelProvider {
               strict: tool.strict,
             },
           })),
-          tool_choice: "auto",
+          tool_choice: params.tools ? "auto" : undefined,
         }),
         signal: abortController.signal,
       });
@@ -113,35 +97,15 @@ export class HttpChatCompletionsProvider implements MathModelProvider {
     const message = payload.choices?.[0]?.message;
     const functionCall = message?.tool_calls?.[0]?.function;
 
-    if (!functionCall?.name || !functionCall.arguments) {
-      return {
-        canSolve: false,
-        reason:
-          message?.content?.trim() ||
-          "暂时只支持两个数字的一次加减乘除，例如：12 加 8、50 减 6、7 乘 9、20 除以 5。",
-      };
-    }
-
-    const parsedArgs = BinaryOperationArgsSchema.safeParse(JSON.parse(functionCall.arguments));
-    if (!parsedArgs.success) {
-      return {
-        canSolve: false,
-        reason: "模型调用工具时传入了无效参数。",
-      };
-    }
-
-    const operation = TOOL_NAME_TO_OPERATION[functionCall.name as Operation];
-    if (!operation) {
-      return {
-        canSolve: false,
-        reason: `模型选择了未知工具：${functionCall.name}`,
-      };
-    }
-
     return {
-      canSolve: true,
-      operation,
-      operands: [parsedArgs.data.left, parsedArgs.data.right],
+      text: message?.content?.trim() || "",
+      toolCall:
+        functionCall?.name && functionCall.arguments
+          ? {
+              name: functionCall.name,
+              arguments: functionCall.arguments,
+            }
+          : undefined,
     };
   }
 }

@@ -72,18 +72,24 @@ export function createMathTools() {
 
 export type MathToolDecision =
   | {
-      canSolve: true;
+      kind: "solve";
       operation: Operation;
       operands: [number, number];
     }
   | {
-      canSolve: false;
+      kind: "clarify";
+      question: string;
+    }
+  | {
+      kind: "reject";
       reason: string;
     };
 
 export const mathToolSystemPrompt = [
   "你是一个数学计算助手。",
   "你只支持两个数字的一次加减乘除。",
+  "用户的输入可能带有生活情境，你需要先从情境中提取参与计算的两个数字和对应操作，再决定是否调用工具。",
+  "例如“冰箱里有 3 个苹果，早上我吃了 1 个，还剩下几个苹果”应该调用 subtract(left=3, right=1)。",
   "你支持多轮对话，可以结合历史对话理解“再加 5”“用上一次结果乘 2”“继续算”等追问。",
   "如果用户引用了上一轮结果、之前提到的数字或代词，你需要优先基于对话历史补全本轮缺失的操作数。",
   "当用户的问题可以通过工具完成时，必须调用且只调用一个工具。",
@@ -91,7 +97,9 @@ export const mathToolSystemPrompt = [
   "传参时必须严格保持用户表达中的数字顺序，绝对不能交换左右参数。",
   "例如“10 减 3”必须传 subtract(left=10, right=3)；“10 除以 2”必须传 divide(left=10, right=2)。",
   "如果用户说“结果再加 5”，应该把上一轮结果作为 left，把 5 作为 right。",
-  "如果问题不属于两个数字的一次加减乘除，就直接用中文简短说明原因。",
+  "如果信息不足，不能猜，不能调用工具，必须只输出一行：CLARIFY: <你要追问的问题>。",
+  "例如“冰箱里有 3 个苹果，早上我吃了苹果，还剩下几个苹果”必须输出类似：CLARIFY: 你早上吃了几个苹果？",
+  "如果问题不属于两个数字的一次加减乘除，不能调用工具，必须只输出一行：UNSUPPORTED: <简短原因>。",
 ].join(" ");
 
 export function normalizeInput(input: string): string {

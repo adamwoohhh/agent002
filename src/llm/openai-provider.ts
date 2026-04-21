@@ -1,14 +1,6 @@
 import OpenAI from "openai";
 
-import {
-  BinaryOperationArgsSchema,
-  createMathTools,
-  mathToolSystemPrompt,
-  TOOL_NAME_TO_OPERATION,
-  type MathToolDecision,
-  type Operation,
-} from "../math.js";
-import { buildConversationPrompt, type ConversationMessage, type MathModelProvider } from "./types.js";
+import type { MathModelProvider, ModelMessage, ModelResponse, ModelTool } from "./types.js";
 
 export class OpenAIResponsesProvider implements MathModelProvider {
   private readonly client: OpenAI;
@@ -27,54 +19,35 @@ export class OpenAIResponsesProvider implements MathModelProvider {
     this.model = process.env.AGX_MODEL?.trim() || "gpt-4.1";
   }
 
-  async chooseMathTool(input: string, history: ConversationMessage[] = []): Promise<MathToolDecision> {
-    const prompt = buildConversationPrompt(input, history);
-
+  async generate(params: {
+    messages: ModelMessage[];
+    tools?: ModelTool[];
+  }): Promise<ModelResponse> {
     const response = await this.client.responses.create({
       model: this.model,
-      input: [
-        {
-          role: "system",
-          content: [{ type: "input_text", text: mathToolSystemPrompt }],
-        },
-        {
-          role: "user",
-          content: [{ type: "input_text", text: prompt }],
-        },
-      ],
-      tools: createMathTools(),
+      input: params.messages.map((message) => ({
+        role: message.role,
+        content: [{ type: "input_text", text: message.content }],
+      })),
+      tools: params.tools?.map((tool) => ({
+        type: "function" as const,
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+        strict: tool.strict ?? null,
+      })),
     });
 
     const functionCall = response.output.find((item) => item.type === "function_call");
-    if (!functionCall || !("name" in functionCall) || !("arguments" in functionCall)) {
-      return {
-        canSolve: false,
-        reason:
-          response.output_text ||
-          "暂时只支持两个数字的一次加减乘除，例如：12 加 8、50 减 6、7 乘 9、20 除以 5。",
-      };
-    }
-
-    const parsedArgs = BinaryOperationArgsSchema.safeParse(JSON.parse(functionCall.arguments));
-    if (!parsedArgs.success) {
-      return {
-        canSolve: false,
-        reason: "模型调用工具时传入了无效参数。",
-      };
-    }
-
-    const operation = TOOL_NAME_TO_OPERATION[functionCall.name as Operation];
-    if (!operation) {
-      return {
-        canSolve: false,
-        reason: `模型选择了未知工具：${functionCall.name}`,
-      };
-    }
-
     return {
-      canSolve: true,
-      operation,
-      operands: [parsedArgs.data.left, parsedArgs.data.right],
+      text: response.output_text || "",
+      toolCall:
+        functionCall && "name" in functionCall && "arguments" in functionCall
+          ? {
+              name: functionCall.name,
+              arguments: functionCall.arguments,
+            }
+          : undefined,
     };
   }
 }

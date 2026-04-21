@@ -11,6 +11,7 @@ import * as z from "zod";
 import { FornaxCallbackHandler } from "@next-ai/fornax-langchain";
 
 import { JsonlRunLogger } from "./logging/jsonl-run-logger.js";
+import { chooseMathTool, formatMathAnswer } from "./llm/math-workflow.js";
 import type { ConversationMessage, MathModelProvider } from "./llm/types.js";
 import {
   normalizeInput,
@@ -26,6 +27,7 @@ const MathAgentState = new StateSchema({
   operation: z.enum(["add", "subtract", "multiply", "divide"]).nullable(),
   operands: z.array(z.number()),
   result: z.number().nullable(),
+  clarificationQuestion: z.string(),
   finalAnswer: z.string(),
 });
 
@@ -46,9 +48,19 @@ export async function runMathAgent(
 
   const parseIntent: GraphNode<typeof MathAgentState> = async (state) => {
     try {
-      const toolDecision = await provider.chooseMathTool(state.normalizedInput, history);
+      const toolDecision = await chooseMathTool(provider, state.normalizedInput, history);
 
-      if (!toolDecision.canSolve) {
+      if (toolDecision.kind === "clarify") {
+        return {
+          operation: null,
+          operands: [],
+          clarificationQuestion: toolDecision.question,
+          messages: [new AIMessage(`模型要求补充信息：${toolDecision.question}`)],
+          finalAnswer: toolDecision.question,
+        };
+      }
+
+      if (toolDecision.kind === "reject") {
         return {
           operation: null,
           operands: [],
@@ -100,19 +112,42 @@ export async function runMathAgent(
   };
 
   const formatAnswer: GraphNode<typeof MathAgentState> = (state) => {
-    if (state.finalAnswer) {
+    if (state.finalAnswer || state.clarificationQuestion) {
       return {
         messages: [new AIMessage("结果已整理完成。")],
       };
     }
 
-    const [left, right] = state.operands;
-    const finalAnswer = `${left} ${TOOL_SYMBOL_MAP[state.operation as Operation]} ${right} = ${state.result}`;
+    return {};
+  };
 
-    return {
-      finalAnswer,
-      messages: [new AIMessage(`最终答复：${finalAnswer}`)],
-    };
+  const draftAnswer: GraphNode<typeof MathAgentState> = async (state) => {
+    if (state.finalAnswer || !state.operation || state.result === null || state.operands.length < 2) {
+      return {};
+    }
+
+    const [left, right] = state.operands;
+    const fallbackAnswer = `${left} ${TOOL_SYMBOL_MAP[state.operation as Operation]} ${right} = ${state.result}`;
+
+    try {
+      const finalAnswer = await formatMathAnswer(provider, {
+        input: state.userInput,
+        history,
+        operation: state.operation,
+        operands: [left, right],
+        result: state.result,
+      });
+
+      return {
+        finalAnswer: finalAnswer.trim() || fallbackAnswer,
+        messages: [new AIMessage(`最终答复：${finalAnswer.trim() || fallbackAnswer}`)],
+      };
+    } catch {
+      return {
+        finalAnswer: fallbackAnswer,
+        messages: [new AIMessage(`最终答复：${fallbackAnswer}`)],
+      };
+    }
   };
 
   const graph = new StateGraph(MathAgentState)
@@ -120,11 +155,13 @@ export async function runMathAgent(
     .addNode("parseIntent", parseIntent)
     .addNode("runCalculation", runCalculation)
     .addNode("formatAnswer", formatAnswer)
+    .addNode("draftAnswer", draftAnswer)
     .addEdge(START, "collectInput")
     .addEdge("collectInput", "parseIntent")
     .addEdge("parseIntent", "runCalculation")
     .addEdge("runCalculation", "formatAnswer")
-    .addEdge("formatAnswer", END)
+    .addEdge("formatAnswer", "draftAnswer")
+    .addEdge("draftAnswer", END)
     .compile();
 
   const initialState = {
@@ -134,6 +171,7 @@ export async function runMathAgent(
     operation: null,
     operands: [],
     result: null,
+    clarificationQuestion: "",
     finalAnswer: "",
   };
 

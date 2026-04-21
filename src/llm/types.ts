@@ -1,27 +1,33 @@
-import type { MathToolDecision } from "../math.js";
-
 export type ConversationMessage = {
   role: "user" | "assistant";
   content: string;
 };
 
-export function buildConversationPrompt(input: string, history: ConversationMessage[] = []): string {
-  if (history.length === 0) {
-    return input;
-  }
+export type ModelMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
 
-  const transcript = history
-    .map((message) => `${message.role === "user" ? "用户" : "助手"}: ${message.content}`)
-    .join("\n");
+export type ModelTool = {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  strict?: boolean;
+};
 
-  return [
-    "以下是之前的对话历史，请你结合上下文理解本轮问题：",
-    transcript,
-    "",
-    `本轮用户问题：${input}`,
-  ].join("\n");
-}
+export type ModelToolCall = {
+  name: string;
+  arguments: string;
+};
+
+export type ModelResponse = {
+  text: string;
+  toolCall?: ModelToolCall;
+};
 
 export interface MathModelProvider {
-  chooseMathTool(input: string, history?: ConversationMessage[]): Promise<MathToolDecision>;
+  generate(params: {
+    messages: ModelMessage[];
+    tools?: ModelTool[];
+  }): Promise<ModelResponse>;
 }

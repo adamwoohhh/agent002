@@ -4,6 +4,12 @@
 
 它接受自然语言输入，通过可切换的 provider 接入模型服务，让 LLM 在 4 个数学工具里选择合适的一个，再返回加减乘除的计算结果。
 
+现在它除了直接计算算式，也支持：
+
+- 结合多轮对话历史继续计算
+- 从生活情境里提取数字和运算关系
+- 当情境缺少必要信息时，先追问一轮再继续计算
+
 参考资料：
 
 - LangGraph 官方 JavaScript 文档: https://docs.langchain.com/oss/javascript/langgraph/use-graph-api
@@ -91,6 +97,10 @@ npm run dev
 助手> 12 + 8 = 20
 你> 结果再乘 2
 助手> 20 * 2 = 40
+你> 冰箱里有 3 个苹果，早上我吃了苹果，还剩下几个苹果
+助手> 你早上吃了几个苹果？
+你> 1个
+助手> 还剩下 2 个苹果。
 ```
 
 ## 测试分层
@@ -186,6 +196,8 @@ START -> collectInput -> parseIntent -> runCalculation -> formatAnswer -> END
 - 一次运算
 - 加、减、乘、除
 - 基于对话历史续算上一轮结果
+- 从简单情境里抽取两个数字做一次运算
+- 信息缺失时先追问一轮
 
 例如：
 
@@ -195,6 +207,8 @@ START -> collectInput -> parseIntent -> runCalculation -> formatAnswer -> END
 - `20 / 5`
 - `结果再乘 2`
 - `上一次结果除以 4`
+- `冰箱里有 3 个苹果，早上我吃了 1 个，还剩下几个苹果`
+- `冰箱里有 3 个苹果，早上我吃了苹果，还剩下几个苹果`
 
 ## 下一步可以怎么扩展
 
