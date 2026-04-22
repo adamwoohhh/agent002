@@ -213,37 +213,16 @@ export async function executeMathGraph(params: {
     lastClarificationQuestion: params.context?.lastClarificationQuestion ?? null,
   };
 
-  await params.logger.write({
-    type: "run_started",
-    timestamp: new Date().toISOString(),
-    runId: params.logger.runId,
-    input: params.input,
-    initialState,
-  });
-
   try {
     const finalState = (await graph.invoke(initialState, {
       callbacks: createObservabilityCallbacks(params.config),
     })) as MathGraphFinalState;
-
-    await params.logger.write({
-      type: "run_completed",
-      timestamp: new Date().toISOString(),
-      runId: params.logger.runId,
-      finalState,
-    });
 
     return {
       finalAnswer: finalState.finalAnswer,
       finalState,
     };
   } catch (error) {
-    await params.logger.write({
-      type: "run_failed",
-      timestamp: new Date().toISOString(),
-      runId: params.logger.runId,
-      error,
-    });
     throw error;
   }
 

@@ -19,11 +19,40 @@ export async function runMathAgent(
       logDirectory: config.logging.directory,
     }));
   const capability = new MathCapability(config, provider, activeLogger);
-
-  return capability.run(input, {
+  const initialContext = {
     ...conversationContext,
     history,
+  };
+
+  await activeLogger.write({
+    type: "run_started",
+    timestamp: new Date().toISOString(),
+    runId: activeLogger.runId,
+    input,
+    phase: "direct_run",
+    initialContext,
   });
+
+  try {
+    const finalAnswer = await capability.run(input, initialContext);
+    await activeLogger.write({
+      type: "run_completed",
+      timestamp: new Date().toISOString(),
+      runId: activeLogger.runId,
+      finalAnswer,
+      phase: "direct_run",
+    });
+    return finalAnswer;
+  } catch (error) {
+    await activeLogger.write({
+      type: "run_failed",
+      timestamp: new Date().toISOString(),
+      runId: activeLogger.runId,
+      error,
+      phase: "direct_run",
+    });
+    throw error;
+  }
 }
 
 export class MathChatSession {

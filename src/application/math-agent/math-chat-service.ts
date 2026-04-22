@@ -22,12 +22,43 @@ export class MathChatService {
   async respond(input: string): Promise<string> {
     const logger = await this.getLogger();
     const capability = new MathCapability(this.config, this.provider, logger);
+    const stateBeforeTurn = snapshotConversationState(this.state);
+
+    await logger.write({
+      type: "run_started",
+      timestamp: new Date().toISOString(),
+      runId: logger.runId,
+      input,
+      phase: "session_turn",
+      stateBeforeTurn,
+    });
 
     // 轮次识别，判断会话中本次用户的输入是否是个新问题 or 当前问题的补充信息
     const turnMode = await this.resolveTurnMode(input, capability);
+    await logger.write({
+      type: "session_event",
+      timestamp: new Date().toISOString(),
+      runId: logger.runId,
+      event: "turn_mode_resolved",
+      input,
+      turnMode,
+      stateBeforeTurn,
+    });
 
     // 提取出本次用户输入中的问题和事实信息
-    this.state = await this.conversationStateManager.beginTurn(this.state, input, turnMode);
+    const turnPreparation = await this.conversationStateManager.beginTurn(this.state, input, turnMode);
+    this.state = turnPreparation.state;
+
+    await logger.write({
+      type: "session_event",
+      timestamp: new Date().toISOString(),
+      runId: logger.runId,
+      event: "conversation_input_analyzed",
+      input,
+      turnMode,
+      analysis: turnPreparation.analysis,
+      stateAfterPreparation: snapshotConversationState(this.state),
+    });
 
     const registry = new CapabilityRegistry();
     registry.register(capability);
@@ -45,6 +76,25 @@ export class MathChatService {
 
     const answer = result.output;
     this.state = this.conversationStateManager.completeTurn(this.state, input, answer);
+
+    await logger.write({
+      type: "session_event",
+      timestamp: new Date().toISOString(),
+      runId: logger.runId,
+      event: "conversation_state_updated",
+      input,
+      answer,
+      stateAfterTurn: snapshotConversationState(this.state),
+    });
+    await logger.write({
+      type: "run_completed",
+      timestamp: new Date().toISOString(),
+      runId: logger.runId,
+      finalAnswer: answer,
+      finalState: snapshotConversationState(this.state),
+      phase: "session_turn",
+    });
+
     return answer;
   }
 
@@ -79,4 +129,13 @@ export class MathChatService {
       );
     }
   }
+}
+
+function snapshotConversationState(state: ConversationState) {
+  return {
+    pendingQuestion: state.pendingQuestion,
+    factMemory: [...state.factMemory],
+    lastClarificationQuestion: state.lastClarificationQuestion,
+    historyLength: state.history.length,
+  };
 }

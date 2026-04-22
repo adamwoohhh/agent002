@@ -1,6 +1,12 @@
 import type { ConversationMessage, MathModelProvider } from "../../../infrastructure/llm/types.js";
 import type { ConversationState } from "../types.js";
 
+export type ConversationInputAnalysis = {
+  pendingQuestion: string;
+  facts: string[];
+  source: "llm" | "fallback";
+};
+
 export function createEmptyConversationState(): ConversationState {
   return {
     history: [],
@@ -21,20 +27,26 @@ export class ConversationStateManager {
     state: ConversationState,
     input: string,
     turnMode: "new_question" | "supplement",
-  ): Promise<ConversationState> {
+  ): Promise<{ state: ConversationState; analysis: ConversationInputAnalysis }> {
     const analysis = await analyzeConversationInput(this.provider, input, turnMode);
 
     if (turnMode === "new_question") {
       return {
-        ...state,
-        pendingQuestion: analysis.pendingQuestion,
-        factMemory: analysis.facts,
+        state: {
+          ...state,
+          pendingQuestion: analysis.pendingQuestion,
+          factMemory: analysis.facts,
+        },
+        analysis,
       };
     }
 
     return {
-      ...state,
-      factMemory: mergeFacts(state.factMemory, analysis.facts),
+      state: {
+        ...state,
+        factMemory: mergeFacts(state.factMemory, analysis.facts),
+      },
+      analysis,
     };
   }
 
@@ -101,10 +113,14 @@ export async function analyzeConversationInput(
   provider: MathModelProvider | undefined,
   input: string,
   turnMode: "new_question" | "supplement",
-): Promise<{ pendingQuestion: string; facts: string[] }> {
-  const fallback = {
+): Promise<ConversationInputAnalysis> {
+  const fallbackBase = {
     pendingQuestion: extractPendingQuestion(input),
     facts: extractFactsFromInput(input),
+  };
+  const fallback: ConversationInputAnalysis = {
+    ...fallbackBase,
+    source: "fallback",
   };
 
   if (!provider) {
@@ -140,8 +156,9 @@ export async function analyzeConversationInput(
     }
 
     return {
-      pendingQuestion: parsed.pendingQuestion || fallback.pendingQuestion,
-      facts: parsed.facts.length > 0 ? parsed.facts : fallback.facts,
+      pendingQuestion: parsed.pendingQuestion || fallbackBase.pendingQuestion,
+      facts: parsed.facts.length > 0 ? parsed.facts : fallbackBase.facts,
+      source: "llm",
     };
   } catch {
     return fallback;

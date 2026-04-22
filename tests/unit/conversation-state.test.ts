@@ -49,7 +49,7 @@ test("conversation state manager carries pending question and fact memory across
   );
   let state = createEmptyConversationState();
 
-  state = await manager.beginTurn(state, "小明今天 10 岁，小明爸爸今年多少岁？", "new_question");
+  ({ state } = await manager.beginTurn(state, "小明今天 10 岁，小明爸爸今年多少岁？", "new_question"));
   assert.equal(state.pendingQuestion, "小明爸爸今年多少岁");
   assert.deepEqual(state.factMemory, ["小明今天 10 岁"]);
 
@@ -60,7 +60,7 @@ test("conversation state manager carries pending question and fact memory across
   );
   assert.equal(state.lastClarificationQuestion, "你还需要补充和爸爸年龄相关的信息吗？");
 
-  state = await manager.beginTurn(state, "小明出生时他妈妈 25 岁。", "supplement");
+  ({ state } = await manager.beginTurn(state, "小明出生时他妈妈 25 岁。", "supplement"));
   assert.deepEqual(state.factMemory, ["小明今天 10 岁", "小明出生时他妈妈 25 岁"]);
 });
 
@@ -75,9 +75,9 @@ test("conversation state manager clears pending question after final answer", as
   );
   let state = createEmptyConversationState();
 
-  state = await manager.beginTurn(state, "冰箱里有 3 个苹果，早上我吃了苹果，还剩下几个苹果？", "new_question");
+  ({ state } = await manager.beginTurn(state, "冰箱里有 3 个苹果，早上我吃了苹果，还剩下几个苹果？", "new_question"));
   state = manager.completeTurn(state, "冰箱里有 3 个苹果，早上我吃了苹果，还剩下几个苹果？", "你早上吃了几个苹果？");
-  state = await manager.beginTurn(state, "1个", "supplement");
+  ({ state } = await manager.beginTurn(state, "1个", "supplement"));
   state = manager.completeTurn(state, "1个", "还剩下 2 个苹果。");
 
   assert.equal(state.pendingQuestion, null);

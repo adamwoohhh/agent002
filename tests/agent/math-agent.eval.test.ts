@@ -586,6 +586,19 @@ test("chat session writes all turns into one shared jsonl file", async () => {
         logLines.filter((line) => line.type === "run_completed").length,
         2,
       );
+      const sessionEvents = logLines.filter((line) => line.type === "session_event");
+      assert.equal(sessionEvents.length, 6);
+      assert.deepEqual(
+        sessionEvents.map((line) => line.event),
+        [
+          "turn_mode_resolved",
+          "conversation_input_analyzed",
+          "conversation_state_updated",
+          "turn_mode_resolved",
+          "conversation_input_analyzed",
+          "conversation_state_updated",
+        ],
+      );
       assert.ok(logLines.every((line) => line.runId === logLines[0].runId));
     },
   );
