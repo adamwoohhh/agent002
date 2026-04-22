@@ -1,4 +1,4 @@
-import type { ConversationMessage } from "../../../infrastructure/llm/types.js";
+import type { ConversationMessage, MathModelProvider } from "../../../infrastructure/llm/types.js";
 import type { ConversationState } from "../types.js";
 
 export function createEmptyConversationState(): ConversationState {
@@ -11,24 +11,30 @@ export function createEmptyConversationState(): ConversationState {
 }
 
 export class ConversationStateManager {
+  constructor(private readonly provider?: MathModelProvider) {}
+
   createInitialState(): ConversationState {
     return createEmptyConversationState();
   }
 
-  beginTurn(state: ConversationState, input: string, turnMode: "new_question" | "supplement"): ConversationState {
-    const normalizedFacts = extractFactsFromInput(input);
+  async beginTurn(
+    state: ConversationState,
+    input: string,
+    turnMode: "new_question" | "supplement",
+  ): Promise<ConversationState> {
+    const analysis = await analyzeConversationInput(this.provider, input, turnMode);
 
     if (turnMode === "new_question") {
       return {
         ...state,
-        pendingQuestion: extractPendingQuestion(input),
-        factMemory: normalizedFacts,
+        pendingQuestion: analysis.pendingQuestion,
+        factMemory: analysis.facts,
       };
     }
 
     return {
       ...state,
-      factMemory: mergeFacts(state.factMemory, normalizedFacts),
+      factMemory: mergeFacts(state.factMemory, analysis.facts),
     };
   }
 
@@ -91,6 +97,57 @@ export function fallbackResolveTurnMode(
   return looksLikeNewQuestion(input) ? "new_question" : "supplement";
 }
 
+export async function analyzeConversationInput(
+  provider: MathModelProvider | undefined,
+  input: string,
+  turnMode: "new_question" | "supplement",
+): Promise<{ pendingQuestion: string; facts: string[] }> {
+  const fallback = {
+    pendingQuestion: extractPendingQuestion(input),
+    facts: extractFactsFromInput(input),
+  };
+
+  if (!provider) {
+    return fallback;
+  }
+
+  try {
+    const response = await provider.generate({
+      messages: [
+        {
+          role: "system",
+          content: [
+            "你是一个对话状态分析助手。",
+            "请从用户输入中提取两个字段，并只输出 JSON，不要输出任何额外解释。",
+            'JSON 格式必须是：{"pendingQuestion":"...","facts":["..."]}。',
+            "pendingQuestion 表示当前待解决问题的核心目标，用一句简短中文表述。",
+            "如果本轮输入类型是新问题，请抽取该问题真正要计算或回答的目标。",
+            "如果本轮输入类型是补充信息，pendingQuestion 可以保留用户输入中的目标句；如果无法判断，返回原输入中最核心的问题表达。",
+            "facts 需要列出输入中适合进入记忆的关键事实，按自然顺序拆成短句。",
+            "不要编造输入中不存在的信息。",
+          ].join("\n"),
+        },
+        {
+          role: "user",
+          content: `本轮输入类型：${turnMode === "new_question" ? "新问题" : "补充信息"}\n本轮用户输入：${input}`,
+        },
+      ],
+    });
+
+    const parsed = parseInputAnalysis(response.text);
+    if (!parsed) {
+      return fallback;
+    }
+
+    return {
+      pendingQuestion: parsed.pendingQuestion || fallback.pendingQuestion,
+      facts: parsed.facts.length > 0 ? parsed.facts : fallback.facts,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 export function extractPendingQuestion(input: string): string {
   const segments = splitIntoSegments(input);
   const explicitQuestion = segments.find((segment) =>
@@ -121,6 +178,44 @@ export function mergeFacts(existingFacts: string[], newFacts: string[]): string[
   }
 
   return merged;
+}
+
+function parseInputAnalysis(text: string): { pendingQuestion: string; facts: string[] } | null {
+  const trimmed = text.trim();
+  const jsonText = extractJsonObject(trimmed);
+  if (!jsonText) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(jsonText) as {
+      pendingQuestion?: unknown;
+      facts?: unknown;
+    };
+
+    const pendingQuestion =
+      typeof parsed.pendingQuestion === "string" ? parsed.pendingQuestion.trim() : "";
+    const facts = Array.isArray(parsed.facts)
+      ? parsed.facts.filter((fact): fact is string => typeof fact === "string").map((fact) => fact.trim()).filter(Boolean)
+      : [];
+
+    return {
+      pendingQuestion,
+      facts,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function extractJsonObject(text: string): string | null {
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace < firstBrace) {
+    return null;
+  }
+
+  return text.slice(firstBrace, lastBrace + 1);
 }
 
 function appendHistory(history: ConversationMessage[], input: string, answer: string): ConversationMessage[] {

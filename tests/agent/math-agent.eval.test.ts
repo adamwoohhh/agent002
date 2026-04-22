@@ -491,9 +491,14 @@ test("agent writes node execution details to one jsonl file per run", async () =
 
       assert.equal(logLines[0].type, "run_started");
       assert.equal(logLines.at(-1)?.type, "run_completed");
-      assert.ok(logLines.some((line) => line.type === "graph_event" && line.mode === "tasks"));
-      assert.ok(logLines.some((line) => line.type === "graph_event" && line.mode === "debug"));
-      assert.ok(logLines.some((line) => line.type === "graph_event" && line.mode === "values"));
+      const graphEvents = logLines.filter((line) => line.type === "graph_event");
+      assert.equal(graphEvents.length, 4);
+      assert.deepEqual(
+        graphEvents.map((line) => line.node),
+        ["normalizeInput", "decideIntent", "executeOperation", "renderAnswer"],
+      );
+      assert.ok(graphEvents.every((line) => line.event === "node_execution"));
+      assert.ok(graphEvents.every((line) => "input" in line && "output" in line));
     },
   );
 });

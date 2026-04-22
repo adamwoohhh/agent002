@@ -8,21 +8,26 @@ import { ConversationStateManager, createEmptyConversationState, fallbackResolve
 import type { ConversationState } from "./types.js";
 
 export class MathChatService {
-  private readonly conversationStateManager = new ConversationStateManager();
   private state: ConversationState = createEmptyConversationState();
   private loggerPromise: Promise<JsonlRunLogger> | null = null;
+  private readonly conversationStateManager: ConversationStateManager;
 
   constructor(
     private readonly config: AppConfig,
     private readonly provider: MathModelProvider,
-  ) {}
+  ) {
+    this.conversationStateManager = new ConversationStateManager(provider);
+  }
 
   async respond(input: string): Promise<string> {
     const logger = await this.getLogger();
     const capability = new MathCapability(this.config, this.provider, logger);
+
+    // 轮次识别，判断会话中本次用户的输入是否是个新问题 or 当前问题的补充信息
     const turnMode = await this.resolveTurnMode(input, capability);
 
-    this.state = this.conversationStateManager.beginTurn(this.state, input, turnMode);
+    // 提取出本次用户输入中的问题和事实信息
+    this.state = await this.conversationStateManager.beginTurn(this.state, input, turnMode);
 
     const registry = new CapabilityRegistry();
     registry.register(capability);

@@ -42,115 +42,132 @@ export type CompiledMathGraphDeps = {
   config: AppConfig;
   decisionService: MathDecisionService;
   answerRenderer: MathAnswerRenderer;
+  logger?: RunLogger;
 };
 
 export function buildMathAgentGraph(deps: CompiledMathGraphDeps) {
-  const collectInput: GraphNode<typeof MathAgentStateSchema> = (state) => {
-    return {
-      normalizedInput: normalizeMathInput(state.userInput),
-      messages: [new AIMessage(`收到问题：${state.userInput}`)],
-    };
-  };
+  const collectInput: GraphNode<typeof MathAgentStateSchema> = createLoggedNode(
+    "normalizeInput",
+    deps.logger,
+    (state) => {
+      return {
+        normalizedInput: normalizeMathInput(state.userInput),
+        messages: [new AIMessage(`收到问题：${state.userInput}`)],
+      };
+    },
+  );
 
-  const decideIntent: GraphNode<typeof MathAgentStateSchema> = async (state) => {
-    try {
-      const toolDecision = await deps.decisionService.chooseMathTool(state.normalizedInput, stateToContext(state));
+  const decideIntent: GraphNode<typeof MathAgentStateSchema> = createLoggedNode(
+    "decideIntent",
+    deps.logger,
+    async (state) => {
+      try {
+        const toolDecision = await deps.decisionService.chooseMathTool(state.normalizedInput, stateToContext(state));
 
-      if (toolDecision.kind === "clarify") {
+        if (toolDecision.kind === "clarify") {
+          return {
+            operation: null,
+            operands: [],
+            clarificationQuestion: toolDecision.question,
+            messages: [new AIMessage(`模型要求补充信息：${toolDecision.question}`)],
+            finalAnswer: toolDecision.question,
+          };
+        }
+
+        if (toolDecision.kind === "reject") {
+          return {
+            operation: null,
+            operands: [],
+            messages: [new AIMessage(`模型未调用数学工具：${toolDecision.reason}`)],
+            finalAnswer:
+              "暂时只支持两个数字的一次加减乘除，例如：`12 加 8`、`50 减 6`、`7 乘 9`、`20 除以 5`。",
+          };
+        }
+
+        return {
+          operation: toolDecision.operation,
+          operands: toolDecision.operands,
+          messages: [
+            new AIMessage(
+              `LLM 已选择工具：${toolDecision.operation}，参数：${toolDecision.operands[0]}, ${toolDecision.operands[1]}`,
+            ),
+          ],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "意图识别失败";
         return {
           operation: null,
           operands: [],
-          clarificationQuestion: toolDecision.question,
-          messages: [new AIMessage(`模型要求补充信息：${toolDecision.question}`)],
-          finalAnswer: toolDecision.question,
+          messages: [new AIMessage(`LLM 意图识别失败：${message}`)],
+          finalAnswer: message,
         };
       }
+    },
+  );
 
-      if (toolDecision.kind === "reject") {
+  const executeOperation: GraphNode<typeof MathAgentStateSchema> = createLoggedNode(
+    "executeOperation",
+    deps.logger,
+    (state) => {
+      if (!state.operation || state.operands.length < 2) {
+        return {};
+      }
+
+      try {
+        const [left, right] = state.operands;
+        const result = mathOperations[state.operation](left, right);
         return {
-          operation: null,
-          operands: [],
-          messages: [new AIMessage(`模型未调用数学工具：${toolDecision.reason}`)],
-          finalAnswer:
-            "暂时只支持两个数字的一次加减乘除，例如：`12 加 8`、`50 减 6`、`7 乘 9`、`20 除以 5`。",
+          result,
+          messages: [new AIMessage(`工具 ${state.operation} 执行完成，结果是 ${result}`)],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "计算失败";
+        return {
+          finalAnswer: message,
+          messages: [new AIMessage(message)],
+        };
+      }
+    },
+  );
+
+  const renderAnswer: GraphNode<typeof MathAgentStateSchema> = createLoggedNode(
+    "renderAnswer",
+    deps.logger,
+    async (state) => {
+      if (state.finalAnswer || state.clarificationQuestion) {
+        return {
+          messages: [new AIMessage("结果已整理完成。")],
         };
       }
 
-      return {
-        operation: toolDecision.operation,
-        operands: toolDecision.operands,
-        messages: [
-          new AIMessage(
-            `LLM 已选择工具：${toolDecision.operation}，参数：${toolDecision.operands[0]}, ${toolDecision.operands[1]}`,
-          ),
-        ],
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "意图识别失败";
-      return {
-        operation: null,
-        operands: [],
-        messages: [new AIMessage(`LLM 意图识别失败：${message}`)],
-        finalAnswer: message,
-      };
-    }
-  };
+      if (!state.operation || state.result === null || state.operands.length < 2) {
+        return {};
+      }
 
-  const executeOperation: GraphNode<typeof MathAgentStateSchema> = (state) => {
-    if (!state.operation || state.operands.length < 2) {
-      return {};
-    }
+      const [left, right] = state.operands as [number, number];
+      const fallbackAnswer = deps.answerRenderer.buildFallbackAnswer(state.operation, [left, right], state.result);
 
-    try {
-      const [left, right] = state.operands;
-      const result = mathOperations[state.operation](left, right);
-      return {
-        result,
-        messages: [new AIMessage(`工具 ${state.operation} 执行完成，结果是 ${result}`)],
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "计算失败";
-      return {
-        finalAnswer: message,
-        messages: [new AIMessage(message)],
-      };
-    }
-  };
+      try {
+        const finalAnswer = await deps.answerRenderer.formatMathAnswer({
+          input: state.userInput,
+          context: stateToContext(state),
+          operation: state.operation,
+          operands: [left, right],
+          result: state.result,
+        });
 
-  const renderAnswer: GraphNode<typeof MathAgentStateSchema> = async (state) => {
-    if (state.finalAnswer || state.clarificationQuestion) {
-      return {
-        messages: [new AIMessage("结果已整理完成。")],
-      };
-    }
-
-    if (!state.operation || state.result === null || state.operands.length < 2) {
-      return {};
-    }
-
-    const [left, right] = state.operands as [number, number];
-    const fallbackAnswer = deps.answerRenderer.buildFallbackAnswer(state.operation, [left, right], state.result);
-
-    try {
-      const finalAnswer = await deps.answerRenderer.formatMathAnswer({
-        input: state.userInput,
-        context: stateToContext(state),
-        operation: state.operation,
-        operands: [left, right],
-        result: state.result,
-      });
-
-      return {
-        finalAnswer: finalAnswer.trim() || fallbackAnswer,
-        messages: [new AIMessage(`最终答复：${finalAnswer.trim() || fallbackAnswer}`)],
-      };
-    } catch {
-      return {
-        finalAnswer: fallbackAnswer,
-        messages: [new AIMessage(`最终答复：${fallbackAnswer}`)],
-      };
-    }
-  };
+        return {
+          finalAnswer: finalAnswer.trim() || fallbackAnswer,
+          messages: [new AIMessage(`最终答复：${finalAnswer.trim() || fallbackAnswer}`)],
+        };
+      } catch {
+        return {
+          finalAnswer: fallbackAnswer,
+          messages: [new AIMessage(`最终答复：${fallbackAnswer}`)],
+        };
+      }
+    },
+  );
 
   return new StateGraph(MathAgentStateSchema)
     .addNode("normalizeInput", collectInput)
@@ -177,6 +194,7 @@ export async function executeMathGraph(params: {
     config: params.config,
     decisionService: params.decisionService,
     answerRenderer: params.answerRenderer,
+    logger: params.logger,
   });
 
   const initialState = {
@@ -203,30 +221,22 @@ export async function executeMathGraph(params: {
     initialState,
   });
 
-  let finalState: MathGraphFinalState | null = null;
-
   try {
-    const stream = await graph.stream(initialState, {
-      streamMode: ["values", "updates", "tasks", "checkpoints", "debug"],
-      debug: true,
+    const finalState = (await graph.invoke(initialState, {
       callbacks: createObservabilityCallbacks(params.config),
+    })) as MathGraphFinalState;
+
+    await params.logger.write({
+      type: "run_completed",
+      timestamp: new Date().toISOString(),
+      runId: params.logger.runId,
+      finalState,
     });
 
-    for await (const chunk of stream) {
-      const [mode, payload] = chunk as [string, unknown];
-
-      await params.logger.write({
-        type: "graph_event",
-        timestamp: new Date().toISOString(),
-        runId: params.logger.runId,
-        mode,
-        payload,
-      });
-
-      if (mode === "values") {
-        finalState = payload as MathGraphFinalState;
-      }
-    }
+    return {
+      finalAnswer: finalState.finalAnswer,
+      finalState,
+    };
   } catch (error) {
     await params.logger.write({
       type: "run_failed",
@@ -237,21 +247,7 @@ export async function executeMathGraph(params: {
     throw error;
   }
 
-  if (!finalState) {
-    throw new Error("LangGraph 未返回最终状态，无法生成结果。");
-  }
-
-  await params.logger.write({
-    type: "run_completed",
-    timestamp: new Date().toISOString(),
-    runId: params.logger.runId,
-    finalState,
-  });
-
-  return {
-    finalAnswer: finalState.finalAnswer,
-    finalState,
-  };
+  throw new Error("LangGraph 未返回最终状态，无法生成结果。");
 }
 
 export type MathGraphFinalState = {
@@ -277,5 +273,67 @@ function stateToContext(state: MathGraphFinalState): MathConversationContext {
     factMemory: state.factMemory,
     turnMode: state.turnMode ?? undefined,
     lastClarificationQuestion: state.lastClarificationQuestion,
+  };
+}
+
+function createLoggedNode(
+  nodeName: string,
+  logger: RunLogger | undefined,
+  node: GraphNode<typeof MathAgentStateSchema>,
+): GraphNode<typeof MathAgentStateSchema> {
+  return async (...args) => {
+    const [state] = args;
+    const input = summarizeGraphState(state as MathGraphFinalState);
+    const output = await node(...args);
+
+    await logger?.write({
+      type: "graph_event",
+      timestamp: new Date().toISOString(),
+      runId: logger.runId,
+      event: "node_execution",
+      node: nodeName,
+      input,
+      output: summarizeNodeUpdate(output),
+    });
+
+    return output;
+  };
+}
+
+function summarizeGraphState(state: MathGraphFinalState) {
+  return {
+    userInput: state.userInput,
+    normalizedInput: state.normalizedInput,
+    operation: state.operation,
+    operands: state.operands,
+    result: state.result,
+    clarificationQuestion: state.clarificationQuestion,
+    finalAnswer: state.finalAnswer,
+    pendingQuestion: state.pendingQuestion,
+    factMemory: state.factMemory,
+    turnMode: state.turnMode,
+    lastClarificationQuestion: state.lastClarificationQuestion,
+    historyLength: state.history.length,
+  };
+}
+
+function summarizeNodeUpdate(update: unknown) {
+  if (!update || typeof update !== "object") {
+    return update;
+  }
+
+  const partial = update as Record<string, unknown>;
+  return {
+    normalizedInput: partial.normalizedInput,
+    operation: partial.operation,
+    operands: partial.operands,
+    result: partial.result,
+    clarificationQuestion: partial.clarificationQuestion,
+    finalAnswer: partial.finalAnswer,
+    pendingQuestion: partial.pendingQuestion,
+    factMemory: partial.factMemory,
+    turnMode: partial.turnMode,
+    lastClarificationQuestion: partial.lastClarificationQuestion,
+    messagesCount: Array.isArray(partial.messages) ? partial.messages.length : undefined,
   };
 }
