@@ -11,7 +11,12 @@ import * as z from "zod";
 import { FornaxCallbackHandler } from "@next-ai/fornax-langchain";
 
 import { JsonlRunLogger } from "./logging/jsonl-run-logger.js";
-import { chooseMathTool, formatMathAnswer } from "./llm/math-workflow.js";
+import {
+  classifyTurnMode,
+  chooseMathTool,
+  formatMathAnswer,
+  type MathConversationContext,
+} from "./llm/math-workflow.js";
 import type { ConversationMessage, MathModelProvider } from "./llm/types.js";
 import {
   normalizeInput,
@@ -35,8 +40,10 @@ export async function runMathAgent(
   input: string,
   provider: MathModelProvider,
   history: ConversationMessage[] = [],
+  logger?: JsonlRunLogger,
+  conversationContext: MathConversationContext = {},
 ): Promise<string> {
-  const logger = await JsonlRunLogger.create();
+  const activeLogger = logger ?? (await JsonlRunLogger.create());
   const callbacks = createCallbacks();
 
   const collectInput: GraphNode<typeof MathAgentState> = (state) => {
@@ -48,7 +55,10 @@ export async function runMathAgent(
 
   const parseIntent: GraphNode<typeof MathAgentState> = async (state) => {
     try {
-      const toolDecision = await chooseMathTool(provider, state.normalizedInput, history);
+      const toolDecision = await chooseMathTool(provider, state.normalizedInput, {
+        ...conversationContext,
+        history,
+      });
 
       if (toolDecision.kind === "clarify") {
         return {
@@ -132,7 +142,10 @@ export async function runMathAgent(
     try {
       const finalAnswer = await formatMathAnswer(provider, {
         input: state.userInput,
-        history,
+        context: {
+          ...conversationContext,
+          history,
+        },
         operation: state.operation,
         operands: [left, right],
         result: state.result,
@@ -175,10 +188,10 @@ export async function runMathAgent(
     finalAnswer: "",
   };
 
-  await logger.write({
+  await activeLogger.write({
     type: "run_started",
     timestamp: new Date().toISOString(),
-    runId: logger.runId,
+    runId: activeLogger.runId,
     input,
     initialState,
   });
@@ -195,10 +208,10 @@ export async function runMathAgent(
     for await (const chunk of stream) {
       const [mode, payload] = chunk as [string, unknown];
 
-      await logger.write({
+      await activeLogger.write({
         type: "graph_event",
         timestamp: new Date().toISOString(),
-        runId: logger.runId,
+        runId: activeLogger.runId,
         mode,
         payload,
       });
@@ -208,10 +221,10 @@ export async function runMathAgent(
       }
     }
   } catch (error) {
-    await logger.write({
+    await activeLogger.write({
       type: "run_failed",
       timestamp: new Date().toISOString(),
-      runId: logger.runId,
+      runId: activeLogger.runId,
       error,
     });
     throw error;
@@ -221,10 +234,10 @@ export async function runMathAgent(
     throw new Error("LangGraph 未返回最终状态，无法生成结果。");
   }
 
-  await logger.write({
+  await activeLogger.write({
     type: "run_completed",
     timestamp: new Date().toISOString(),
-    runId: logger.runId,
+    runId: activeLogger.runId,
     finalState,
   });
 
@@ -233,11 +246,31 @@ export async function runMathAgent(
 
 export class MathChatSession {
   private readonly history: ConversationMessage[] = [];
+  private loggerPromise: Promise<JsonlRunLogger> | null = null;
+  private pendingQuestion: string | null = null;
+  private factMemory: string[] = [];
+  private lastClarificationQuestion: string | null = null;
 
   constructor(private readonly provider: MathModelProvider) {}
 
   async respond(input: string): Promise<string> {
-    const finalAnswer = await runMathAgent(input, this.provider, this.history);
+    const logger = await this.getLogger();
+    const turnMode = await this.resolveTurnMode(input);
+    const normalizedFacts = extractFactsFromInput(input);
+
+    if (turnMode === "new_question") {
+      this.pendingQuestion = extractPendingQuestion(input);
+      this.factMemory = normalizedFacts;
+    } else {
+      this.factMemory = mergeFacts(this.factMemory, normalizedFacts);
+    }
+
+    const finalAnswer = await runMathAgent(input, this.provider, this.history, logger, {
+      pendingQuestion: this.pendingQuestion,
+      factMemory: this.factMemory,
+      turnMode,
+      lastClarificationQuestion: this.lastClarificationQuestion,
+    });
 
     this.history.push(
       {
@@ -250,12 +283,107 @@ export class MathChatSession {
       },
     );
 
+    if (finalAnswer === this.lastClarificationQuestion) {
+      return finalAnswer;
+    }
+
+    if (looksLikeClarification(finalAnswer)) {
+      this.lastClarificationQuestion = finalAnswer;
+    } else {
+      this.lastClarificationQuestion = null;
+      this.pendingQuestion = null;
+    }
+
     return finalAnswer;
   }
 
   getHistory(): ConversationMessage[] {
     return [...this.history];
   }
+
+  private getLogger(): Promise<JsonlRunLogger> {
+    this.loggerPromise ??= JsonlRunLogger.create("agx-chat");
+    return this.loggerPromise;
+  }
+
+  private async resolveTurnMode(input: string): Promise<"new_question" | "supplement"> {
+    if (!this.pendingQuestion) {
+      return "new_question";
+    }
+
+    try {
+      return await classifyTurnMode(this.provider, input, {
+        history: this.history,
+        pendingQuestion: this.pendingQuestion,
+        factMemory: this.factMemory,
+        lastClarificationQuestion: this.lastClarificationQuestion,
+      });
+    } catch {
+      return fallbackResolveTurnMode(input, this.pendingQuestion, this.lastClarificationQuestion);
+    }
+  }
+}
+
+function looksLikeClarification(answer: string): boolean {
+  return (
+    /[？?]$/.test(answer.trim()) ||
+    /(请.*补充|请.*提供|还缺|还需要|缺少|缺失)/.test(answer)
+  );
+}
+
+function looksLikeNewQuestion(input: string): boolean {
+  const trimmed = input.trim();
+  if (/[？?]$/.test(trimmed)) {
+    return true;
+  }
+
+  return /(多少|几岁|几|什么|为何|为什么|怎么|如何|谁|哪一个)/.test(trimmed);
+}
+
+function fallbackResolveTurnMode(
+  input: string,
+  pendingQuestion: string | null,
+  lastClarificationQuestion: string | null,
+): "new_question" | "supplement" {
+  if (!pendingQuestion) {
+    return "new_question";
+  }
+
+  if (lastClarificationQuestion) {
+    return "supplement";
+  }
+
+  return looksLikeNewQuestion(input) ? "new_question" : "supplement";
+}
+
+function extractPendingQuestion(input: string): string {
+  const segments = splitIntoSegments(input);
+  const explicitQuestion = segments.find((segment) => /[？?]|(多少|几岁|几|什么|为何|为什么|怎么|如何|谁|哪一个)/.test(segment));
+  return explicitQuestion ?? input.trim();
+}
+
+function extractFactsFromInput(input: string): string[] {
+  return splitIntoSegments(input).filter((segment) => {
+    return !/[？?]/.test(segment) && /(\d|[零一二三四五六七八九十百千万两])/.test(segment);
+  });
+}
+
+function splitIntoSegments(input: string): string[] {
+  return input
+    .split(/[。！？?!；;，,]/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+function mergeFacts(existingFacts: string[], newFacts: string[]): string[] {
+  const merged = [...existingFacts];
+  for (const fact of newFacts) {
+    if (!merged.includes(fact)) {
+      merged.push(fact);
+    }
+  }
+
+  return merged;
 }
 
 function createCallbacks() {

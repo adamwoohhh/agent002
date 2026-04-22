@@ -18,7 +18,7 @@ export class JsonlRunLogger {
     this.runId = runId;
   }
 
-  static async create(prefix = "math-agent-run"): Promise<JsonlRunLogger> {
+  static async create(prefix = "agx-run"): Promise<JsonlRunLogger> {
     const runId = randomUUID();
     const fileName = `${prefix}-${new Date().toISOString().replaceAll(":", "-")}-${runId}.jsonl`;
     const logDirectory = resolveLogDirectory();

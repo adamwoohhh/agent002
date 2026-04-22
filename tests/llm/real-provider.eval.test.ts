@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createMathModelProvider } from "../../src/llm/index.js";
-import { runMathAgent } from "../../src/agent.js";
+import { MathChatSession, runMathAgent } from "../../src/agent.js";
 
 const shouldRun = process.env.AGX_ENABLE_LLM_EVALS === "1";
 const llmTest = shouldRun ? test : test.skip;
@@ -23,4 +23,16 @@ llmTest("real llm evals: active provider preserves current agent capability", as
       assert.equal(actual, item.expected);
     });
   }
+
+  await t.test("bad case: keep the original target question across supplemental turns", async () => {
+    const session = new MathChatSession(provider);
+
+    const answer1 = await session.respond("小明今天 10 岁，小明爸爸今年多少岁？");
+    const answer2 = await session.respond("小明出生时他妈妈 25 岁。");
+    const answer3 = await session.respond("小明出生三年后小明妹妹小美出生了，小美的爸爸当时是 28 岁。");
+
+    assert.match(answer1, /小明爸爸|相关信息|补充/);
+    assert.match(answer2, /小明爸爸|相关信息|补充/);
+    assert.match(answer3, /35/);
+  });
 });
