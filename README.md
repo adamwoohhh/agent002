@@ -146,24 +146,57 @@ AGX_ENABLE_LLM_EVALS=1 npm run eval
 - `npm run eval:llm` 只跑真实模型评测
 - `npm run eval` 会先跑本地稳定测试，再跑真实模型评测
 
-## 图结构
+## 当前架构
 
-这个 demo 有 4 个节点：
+项目已经从单文件 demo 重构成分层结构：
 
-1. `collectInput`
-2. `parseIntent`
-3. `runCalculation`
-4. `formatAnswer`
+- `src/app/`
+  - 应用入口与 CLI
+  - 暴露 `createAgentApp(config)`，统一创建单轮运行和多轮 session
+- `src/application/`
+  - 数学 agent 的应用编排层
+  - 包含 graph orchestration、conversation state、prompt builder、decision service、answer renderer
+- `src/domain/`
+  - 纯领域规则
+  - 当前主要是四则运算、领域类型和领域错误
+- `src/infrastructure/`
+  - provider、配置解析、日志与观测
+  - `AppConfig` 在这一层统一收敛环境变量与 CLI 覆盖
+- `src/platform/`
+  - 通用 agent runtime 骨架
+  - 提供 `CapabilityRegistry`、`AgentRuntime`、`ExecutionPolicy`、`TaskManager`
+
+这次重构的目标不是一步变成完整的通用 coding agent，而是先把“单领域 agent”拆清楚，同时为后续平台化能力预留接口。
+
+## Graph 结构
+
+当前数学 agent graph 固定为 4 个职责清晰的节点：
+
+1. `normalizeInput`
+2. `decideIntent`
+3. `executeOperation`
+4. `renderAnswer`
 
 执行链路如下：
 
 ```text
-START -> collectInput -> parseIntent -> runCalculation -> formatAnswer -> END
+START -> normalizeInput -> decideIntent -> executeOperation -> renderAnswer -> END
 ```
+
+其中：
+
+- `normalizeInput`
+  - 做输入归一化，保证 provider 看到的是稳定表达
+- `decideIntent`
+  - 通过 provider + tool calling 选择数学工具、拒绝或追问
+- `executeOperation`
+  - 执行纯领域运算
+- `renderAnswer`
+  - 把计算结果整理成用户可读回答
 
 ## LLM 接入方式
 
-`parseIntent` 节点现在不直接依赖某个具体模型 SDK，而是通过 provider 抽象完成 tool calling。当前项目内置两个实现：
+`decideIntent` 和 `renderAnswer` 不直接依赖某个具体模型 SDK，而是通过 provider 抽象完成模型调用。当前项目内置两个实现：
 
 - `openai provider`
 - `http provider`
@@ -187,8 +220,49 @@ START -> collectInput -> parseIntent -> runCalculation -> formatAnswer -> END
 - 模型接入与业务图编排解耦，可以按环境变量切换 provider
 - 模型不需要直接输出结构化意图 schema，而是直接做工具选择
 - 后续可以继续增加更多工具，而不是不断扩展解析逻辑
+- provider 不再是应用核心，而只是 runtime 能消费的基础设施适配器
+
+## Runtime 骨架
+
+为了给后续往 Codex / Claude Code 风格演进打底，项目现在增加了一个轻量 runtime 骨架：
+
+- `CapabilityRegistry`
+  - 注册能力模块
+- `MathCapability`
+  - 数学能力作为第一个 capability 接入
+- `AgentRuntime`
+  - 负责创建 task / run、执行 capability、挂接 policy 和 observability
+- `ExecutionPolicy`
+  - 当前默认 `AllowAll`，但接口已经固定，后续可以接审批和 sandbox 约束
+
+这部分还不是完整的平台能力，但已经把“数学流程”从“唯一主流程”提升成了“可被 runtime 执行的 capability”。
 
 ## 支持范围
+
+## 日志查看器
+
+项目内置了一个本地日志 Web Viewer，用来查看 `logs/*.jsonl` 运行日志。
+
+启动方式：
+
+```bash
+npm run log:view
+```
+
+自定义端口或日志目录：
+
+```bash
+npm run log:view -- --port=3789 --log-dir=./logs
+```
+
+启动后打开终端输出里的本地地址即可。第一版页面提供：
+
+- 左侧日志文件列表
+- 中间事件时间线，展示 `sequence`、`timestamp`、`type` 和 `graph_event.mode`
+- 右侧单条事件的完整 JSON 详情
+- 顶部摘要卡片与基础筛选（按事件类型、mode、关键字）
+
+当前日志查看器只读，不会修改或删除本地日志文件，也暂不支持实时 tail。
 
 当前示例故意保持简单，只支持：
 

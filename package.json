@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node --import tsx src/index.ts",
     "start": "node --import tsx src/index.ts",
+    "log:view": "node --import tsx src/tools/log-viewer.ts",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:unit && npm run test:agent",
     "test:unit": "node --import tsx --test tests/unit/**/*.test.ts",
