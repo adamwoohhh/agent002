@@ -1,4 +1,4 @@
-import type { RunLogger } from "../../infrastructure/observability/run-logger.js";
+import type { TelemetryWriter } from "../../infrastructure/observability/telemetry-writer.js";
 import { CapabilityRegistry } from "./capability.js";
 import type { ExecutionPolicy } from "./policy.js";
 import { AllowAllExecutionPolicy } from "./policy.js";
@@ -17,7 +17,7 @@ export class AgentRuntime {
     private readonly registry: CapabilityRegistry,
     private readonly taskManager = new TaskManager(),
     private readonly policy: ExecutionPolicy = new AllowAllExecutionPolicy(),
-    private readonly logger?: RunLogger,
+    private readonly logger?: TelemetryWriter,
   ) {}
 
   async execute(capabilityName: string, input: string, context?: RunContext): Promise<RunResult> {

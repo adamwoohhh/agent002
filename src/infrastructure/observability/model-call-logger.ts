@@ -1,10 +1,10 @@
 import type { MathModelProvider, ModelMessage, ModelResponse, ModelTool } from "../llm/types.js";
-import type { RunLogger } from "./run-logger.js";
+import type { TelemetryWriter } from "./telemetry-writer.js";
 import { createEventId } from "./event-tree.js";
 
 export async function generateWithLogging(params: {
   provider: MathModelProvider;
-  logger?: RunLogger;
+  logger?: TelemetryWriter;
   parentEventId?: string;
   purpose: string;
   messages: ModelMessage[];
@@ -23,6 +23,7 @@ export async function generateWithLogging(params: {
       eventId: createEventId(),
       parentEventId: params.parentEventId,
       purpose: params.purpose,
+      input: summarizeModelInput(params.messages, params.tools),
       provider: response.provider,
       model: response.model,
       usage: response.usage,
@@ -38,8 +39,23 @@ export async function generateWithLogging(params: {
       eventId: createEventId(),
       parentEventId: params.parentEventId,
       purpose: params.purpose,
+      input: summarizeModelInput(params.messages, params.tools),
       error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
     });
     throw error;
   }
+}
+
+function summarizeModelInput(messages: ModelMessage[], tools?: ModelTool[]) {
+  return {
+    messages: messages.map((message) => ({
+      role: message.role,
+      contentPreview:
+        message.content.length > 200 ? `${message.content.slice(0, 200)}...` : message.content,
+    })),
+    tools: tools?.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+    })),
+  };
 }

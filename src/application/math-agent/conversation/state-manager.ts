@@ -1,5 +1,5 @@
 import type { ConversationMessage, MathModelProvider } from "../../../infrastructure/llm/types.js";
-import type { RunLogger } from "../../../infrastructure/observability/run-logger.js";
+import type { TelemetryWriter } from "../../../infrastructure/observability/telemetry-writer.js";
 import { generateWithLogging } from "../../../infrastructure/observability/model-call-logger.js";
 import type { ConversationState } from "../types.js";
 
@@ -21,7 +21,7 @@ export function createEmptyConversationState(): ConversationState {
 export class ConversationStateManager {
   constructor(
     private readonly provider?: MathModelProvider,
-    private readonly logger?: RunLogger,
+    private readonly logger?: TelemetryWriter,
   ) {}
 
   createInitialState(): ConversationState {
@@ -119,7 +119,7 @@ export async function analyzeConversationInput(
   provider: MathModelProvider | undefined,
   input: string,
   turnMode: "new_question" | "supplement",
-  logger?: RunLogger,
+  logger?: TelemetryWriter,
   parentEventId?: string,
 ): Promise<ConversationInputAnalysis> {
   const fallbackBase = {

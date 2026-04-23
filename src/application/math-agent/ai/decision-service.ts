@@ -1,6 +1,6 @@
 import { BinaryOperationArgsSchema, type MathToolDecision, type Operation } from "../../../domain/math/types.js";
 import type { MathModelProvider } from "../../../infrastructure/llm/types.js";
-import type { RunLogger } from "../../../infrastructure/observability/run-logger.js";
+import type { TelemetryWriter } from "../../../infrastructure/observability/telemetry-writer.js";
 import { generateWithLogging } from "../../../infrastructure/observability/model-call-logger.js";
 import type { MathConversationContext } from "../types.js";
 import { buildConversationPrompt, buildTurnModePrompt, mathToolSystemPrompt } from "../prompts/math-prompts.js";
@@ -9,7 +9,7 @@ import { createMathTools, TOOL_NAME_TO_OPERATION } from "../tools/math-tools.js"
 export class MathDecisionService {
   constructor(
     private readonly provider: MathModelProvider,
-    private readonly logger?: RunLogger,
+    private readonly logger?: TelemetryWriter,
   ) {}
 
   async classifyTurnMode(

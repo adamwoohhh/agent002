@@ -1,1 +1,1 @@
-export { JsonlRunLogger } from "../infrastructure/observability/jsonl-run-logger.js";
+export { LocalJsonlTelemetryWriter as JsonlRunLogger } from "../infrastructure/observability/local-jsonl-telemetry-writer.js";

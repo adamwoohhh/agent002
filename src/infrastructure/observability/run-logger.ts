@@ -1,11 +1,2 @@
-export type RunLogEvent = {
-  type: string;
-  timestamp: string;
-  [key: string]: unknown;
-};
-
-export interface RunLogger {
-  readonly runId: string;
-  readonly filePath?: string;
-  write(event: RunLogEvent): Promise<void>;
-}
+export type { TelemetryEvent as RunLogEvent } from "./telemetry-writer.js";
+export type { TelemetryWriter as RunLogger } from "./telemetry-writer.js";

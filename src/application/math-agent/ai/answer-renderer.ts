@@ -1,6 +1,6 @@
 import { operationSymbolMap } from "../../../domain/math/operations.js";
 import type { MathModelProvider } from "../../../infrastructure/llm/types.js";
-import type { RunLogger } from "../../../infrastructure/observability/run-logger.js";
+import type { TelemetryWriter } from "../../../infrastructure/observability/telemetry-writer.js";
 import { generateWithLogging } from "../../../infrastructure/observability/model-call-logger.js";
 import type { MathConversationContext } from "../types.js";
 import { buildFormatAnswerSystemPrompt, buildFormatAnswerUserPrompt } from "../prompts/math-prompts.js";
@@ -8,7 +8,7 @@ import { buildFormatAnswerSystemPrompt, buildFormatAnswerUserPrompt } from "../p
 export class MathAnswerRenderer {
   constructor(
     private readonly provider: MathModelProvider,
-    private readonly logger?: RunLogger,
+    private readonly logger?: TelemetryWriter,
   ) {}
 
   async formatMathAnswer(params: {

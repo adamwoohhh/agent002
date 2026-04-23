@@ -1,7 +1,8 @@
 import type { AppConfig } from "../../infrastructure/config/app-config.js";
 import type { MathModelProvider } from "../../infrastructure/llm/types.js";
 import { createEventId } from "../../infrastructure/observability/event-tree.js";
-import { JsonlRunLogger } from "../../infrastructure/observability/jsonl-run-logger.js";
+import { createTelemetryWriter } from "../../infrastructure/observability/create-telemetry-writer.js";
+import type { TelemetryWriter } from "../../infrastructure/observability/telemetry-writer.js";
 import { AgentRuntime } from "../../platform/runtime/agent-runtime.js";
 import { CapabilityRegistry } from "../../platform/runtime/capability.js";
 import { MathCapability } from "./math-capability.js";
@@ -10,7 +11,7 @@ import type { ConversationState } from "./types.js";
 
 export class MathChatService {
   private state: ConversationState = createEmptyConversationState();
-  private loggerPromise: Promise<JsonlRunLogger> | null = null;
+  private loggerPromise: Promise<TelemetryWriter> | null = null;
   private conversationStateManager: ConversationStateManager;
 
   constructor(
@@ -135,11 +136,8 @@ export class MathChatService {
     return [...this.state.history];
   }
 
-  private getLogger(): Promise<JsonlRunLogger> {
-    this.loggerPromise ??= JsonlRunLogger.create("agx-chat", {
-      logDirectory: this.config.logging.directory,
-      ...this.config,
-    });
+  private getLogger(): Promise<TelemetryWriter> {
+    this.loggerPromise ??= createTelemetryWriter("agx-chat", this.config);
     return this.loggerPromise;
   }
 

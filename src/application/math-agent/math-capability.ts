@@ -4,7 +4,7 @@ import { executeMathGraph } from "./graph/math-agent-graph.js";
 import type { MathConversationContext } from "./types.js";
 import type { AppConfig } from "../../infrastructure/config/app-config.js";
 import type { MathModelProvider } from "../../infrastructure/llm/types.js";
-import type { RunLogger } from "../../infrastructure/observability/run-logger.js";
+import type { TelemetryWriter } from "../../infrastructure/observability/telemetry-writer.js";
 import type { Capability, CapabilityResult } from "../../platform/runtime/capability.js";
 import type { RunContext } from "../../platform/runtime/types.js";
 
@@ -16,7 +16,7 @@ export class MathCapability implements Capability {
   constructor(
     private readonly config: AppConfig,
     private readonly provider: MathModelProvider,
-    private readonly logger: RunLogger,
+    private readonly logger: TelemetryWriter,
   ) {
     this.decisionService = new MathDecisionService(provider, logger);
     this.answerRenderer = new MathAnswerRenderer(provider, logger);

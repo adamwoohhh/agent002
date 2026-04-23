@@ -3,23 +3,21 @@ import { MathChatService } from "../../src/application/math-agent/math-chat-serv
 import type { MathConversationContext } from "../../src/application/math-agent/types.js";
 import { resolveAppConfig, type AppConfig } from "../../src/infrastructure/config/app-config.js";
 import { createEventId } from "../../src/infrastructure/observability/event-tree.js";
-import { JsonlRunLogger } from "../../src/infrastructure/observability/jsonl-run-logger.js";
+import { createTelemetryWriter } from "../../src/infrastructure/observability/create-telemetry-writer.js";
+import type { TelemetryWriter } from "../../src/infrastructure/observability/telemetry-writer.js";
 import type { ConversationMessage, MathModelProvider } from "../../src/infrastructure/llm/types.js";
 
 export async function runMathAgent(
   input: string,
   provider: MathModelProvider,
   history: ConversationMessage[] = [],
-  logger?: JsonlRunLogger,
+  logger?: TelemetryWriter,
   conversationContext: MathConversationContext = {},
 ): Promise<string> {
   const config = resolveAppConfig();
   const activeLogger =
     logger ??
-    (await JsonlRunLogger.create("agx-run", {
-      logDirectory: config.logging.directory,
-      ...config,
-    }));
+    (await createTelemetryWriter("agx-run", config));
   const capability = new MathCapability(config, provider, activeLogger);
   const initialContext = {
     ...conversationContext,
@@ -71,6 +69,7 @@ export async function runMathAgent(
       finalAnswer,
       phase: "direct_run",
     });
+    await activeLogger.flush?.();
     return finalAnswer;
   } catch (error) {
     await activeLogger.write({
@@ -82,6 +81,7 @@ export async function runMathAgent(
       error,
       phase: "direct_run",
     });
+    await activeLogger.flush?.();
     throw error;
   }
 }

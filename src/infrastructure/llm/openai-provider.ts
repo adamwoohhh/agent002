@@ -79,6 +79,10 @@ function defaultConfig(): AppConfig {
     observability: {
       fornaxAk: process.env.FORNAX_AK?.trim() || undefined,
       fornaxSk: process.env.FORNAX_SK?.trim() || undefined,
+      fornaxAppName: process.env.FORNAX_APP_NAME?.trim() || "langgraph-ts-demo",
+      fornaxProcessor: "batch",
+      fornaxRecordInputs: true,
+      fornaxRecordOutputs: true,
     },
   };
 }

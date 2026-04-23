@@ -11,8 +11,7 @@ import * as z from "zod";
 
 import { mathOperations, normalizeMathInput } from "../../../domain/math/operations.js";
 import { createEventId } from "../../../infrastructure/observability/event-tree.js";
-import type { RunLogger } from "../../../infrastructure/observability/run-logger.js";
-import { createObservabilityCallbacks } from "../../../infrastructure/observability/fornax.js";
+import type { TelemetryWriter } from "../../../infrastructure/observability/telemetry-writer.js";
 import type { AppConfig } from "../../../infrastructure/config/app-config.js";
 import { MathAnswerRenderer } from "../ai/answer-renderer.js";
 import { MathDecisionService } from "../ai/decision-service.js";
@@ -44,7 +43,7 @@ export type CompiledMathGraphDeps = {
   config: AppConfig;
   decisionService: MathDecisionService;
   answerRenderer: MathAnswerRenderer;
-  logger?: RunLogger;
+  logger?: TelemetryWriter;
 };
 
 export function buildMathAgentGraph(deps: CompiledMathGraphDeps) {
@@ -190,7 +189,7 @@ export function buildMathAgentGraph(deps: CompiledMathGraphDeps) {
 
 export async function executeMathGraph(params: {
   config: AppConfig;
-  logger: RunLogger;
+  logger: TelemetryWriter;
   decisionService: MathDecisionService;
   answerRenderer: MathAnswerRenderer;
   input: string;
@@ -222,9 +221,7 @@ export async function executeMathGraph(params: {
   };
 
   try {
-    const finalState = (await graph.invoke(initialState, {
-      callbacks: createObservabilityCallbacks(params.config),
-    })) as MathGraphFinalState;
+    const finalState = (await graph.invoke(initialState, {})) as MathGraphFinalState;
 
     return {
       finalAnswer: finalState.finalAnswer,
@@ -266,7 +263,7 @@ function stateToContext(state: MathGraphFinalState): MathConversationContext {
 
 function createLoggedNode(
   nodeName: string,
-  logger: RunLogger | undefined,
+  logger: TelemetryWriter | undefined,
   node: (
     state: Parameters<GraphNode<typeof MathAgentStateSchema>>[0],
     eventId: string,
@@ -282,7 +279,7 @@ function createLoggedNode(
       timestamp: new Date().toISOString(),
       runId: logger.runId,
       eventId,
-      parentEventId: (state as MathGraphFinalState).graphParentEventId,
+      parentEventId: (state as MathGraphFinalState).graphParentEventId ?? undefined,
       event: "node_execution",
       node: nodeName,
       input,
