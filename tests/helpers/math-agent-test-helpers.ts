@@ -18,6 +18,7 @@ export async function runMathAgent(
     logger ??
     (await JsonlRunLogger.create("agx-run", {
       logDirectory: config.logging.directory,
+      ...config,
     }));
   const capability = new MathCapability(config, provider, activeLogger);
   const initialContext = {

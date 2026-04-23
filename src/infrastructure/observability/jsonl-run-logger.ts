@@ -1,27 +1,65 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { FornaxSpan, fornaxTracer } from '@next-ai/fornax-sdk/tracer';
 
 import type { RunLogEvent, RunLogger } from "./run-logger.js";
+import { AppConfig } from "../config/app-config.js";
 
 export class JsonlRunLogger implements RunLogger {
+  private sequence = 0;
   readonly runId: string;
   readonly filePath: string;
-  private sequence = 0;
+  private fornaxTracer?: typeof fornaxTracer;
 
-  private constructor(filePath: string, runId: string) {
-    this.filePath = filePath;
-    this.runId = runId;
+  readonly rootSpan?: FornaxSpan;
+
+  private constructor(config: {
+    runId: string;
+    filePath: string;
+    fornaxTracer?: typeof fornaxTracer;
+    rootSpan?: FornaxSpan;
+  }) {
+    this.runId = config.runId;
+    this.filePath = config.filePath;
+    this.fornaxTracer = config.fornaxTracer;
+    this.rootSpan = config.rootSpan;
   }
 
-  static async create(prefix = "agx-run", options?: { logDirectory?: string }): Promise<JsonlRunLogger> {
+  static async create(prefix = "agx-run", options: { logDirectory?: string } & AppConfig): Promise<JsonlRunLogger> {
     const runId = randomUUID();
     const fileName = `${prefix}-${new Date().toISOString().replaceAll(":", "-")}-${runId}.jsonl`;
     const logDirectory = resolveLogDirectory(options?.logDirectory);
 
+    let fornaxTracerInstance: typeof fornaxTracer | undefined;
+    let rootSpan: FornaxSpan | undefined;
+    if (options.observability.fornaxAk && options.observability.fornaxSk) {
+      fornaxTracer.initialize({
+        ak: options.observability.fornaxAk,
+        sk: options.observability.fornaxSk,
+      });
+
+      fornaxTracerInstance = fornaxTracer;
+
+      rootSpan = fornaxTracerInstance?.startSpan({
+        name: prefix.toUpperCase(),
+        type: "custom",
+        threadId: runId,
+      });
+
+      rootSpan?.setOutput({})?.end();
+    }
+
     await mkdir(logDirectory, { recursive: true });
 
-    return new JsonlRunLogger(path.join(logDirectory, fileName), runId);
+    const intstance = new JsonlRunLogger({
+      runId,
+      filePath: path.join(logDirectory, fileName),
+      fornaxTracer: fornaxTracerInstance,
+      rootSpan,
+    });
+
+    return intstance;
   }
 
   async write(event: RunLogEvent): Promise<void> {

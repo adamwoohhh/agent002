@@ -138,6 +138,7 @@ export class MathChatService {
   private getLogger(): Promise<JsonlRunLogger> {
     this.loggerPromise ??= JsonlRunLogger.create("agx-chat", {
       logDirectory: this.config.logging.directory,
+      ...this.config,
     });
     return this.loggerPromise;
   }

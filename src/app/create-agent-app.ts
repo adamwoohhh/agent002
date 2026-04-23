@@ -28,6 +28,7 @@ export function createAgentApp(config: AppConfig): AgentApp {
     async run(input: string): Promise<AgentResult> {
       const logger = await JsonlRunLogger.create("agx-run", {
         logDirectory: config.logging.directory,
+        ...config,
       });
       const registry = new CapabilityRegistry();
       registry.register(new MathCapability(config, provider, logger));
