@@ -8,7 +8,15 @@ export type LogEvent = {
   type?: string;
   timestamp?: string;
   mode?: string;
+  eventId?: string;
+  parentEventId?: string;
   [key: string]: unknown;
+};
+
+export type LogEventTreeNode = {
+  event: LogEvent;
+  index: number;
+  children: LogEventTreeNode[];
 };
 
 export type ParseError = {
@@ -43,6 +51,7 @@ export type LogFileListItem = {
 export type ParsedLogFile = {
   summary: LogFileSummary;
   events: LogEvent[];
+  eventTree: LogEventTreeNode[];
   parseErrors: ParseError[];
 };
 
@@ -111,8 +120,47 @@ export function parseJsonlContent(content: string, fileName = "unknown.jsonl"): 
   return {
     summary: buildLogFileSummary(events, fileName),
     events,
+    eventTree: buildEventTree(events),
     parseErrors,
   };
+}
+
+export function buildEventTree(events: LogEvent[]): LogEventTreeNode[] {
+  const nodes = events.map((event, index) => ({
+    event,
+    index,
+    children: [],
+  }));
+
+  const byEventId = new Map<string, LogEventTreeNode>();
+  for (const node of nodes) {
+    if (typeof node.event.eventId === "string" && node.event.eventId.length > 0) {
+      byEventId.set(node.event.eventId, node);
+    }
+  }
+
+  const roots: LogEventTreeNode[] = [];
+  for (const node of nodes) {
+    const parentEventId =
+      typeof node.event.parentEventId === "string" && node.event.parentEventId.length > 0
+        ? node.event.parentEventId
+        : null;
+
+    if (!parentEventId) {
+      roots.push(node);
+      continue;
+    }
+
+    const parentNode = byEventId.get(parentEventId);
+    if (!parentNode || parentNode === node) {
+      roots.push(node);
+      continue;
+    }
+
+    parentNode.children.push(node);
+  }
+
+  return roots;
 }
 
 export function buildLogFileSummary(events: LogEvent[], fileName: string): LogFileSummary {

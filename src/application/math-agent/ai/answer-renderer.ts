@@ -1,10 +1,15 @@
 import { operationSymbolMap } from "../../../domain/math/operations.js";
 import type { MathModelProvider } from "../../../infrastructure/llm/types.js";
+import type { RunLogger } from "../../../infrastructure/observability/run-logger.js";
+import { generateWithLogging } from "../../../infrastructure/observability/model-call-logger.js";
 import type { MathConversationContext } from "../types.js";
 import { buildFormatAnswerSystemPrompt, buildFormatAnswerUserPrompt } from "../prompts/math-prompts.js";
 
 export class MathAnswerRenderer {
-  constructor(private readonly provider: MathModelProvider) {}
+  constructor(
+    private readonly provider: MathModelProvider,
+    private readonly logger?: RunLogger,
+  ) {}
 
   async formatMathAnswer(params: {
     input: string;
@@ -12,8 +17,12 @@ export class MathAnswerRenderer {
     operation: string;
     operands: [number, number];
     result: number;
-  }): Promise<string> {
-    const response = await this.provider.generate({
+  }, parentEventId?: string): Promise<string> {
+    const response = await generateWithLogging({
+      provider: this.provider,
+      logger: this.logger,
+      parentEventId,
+      purpose: "format_math_answer",
       messages: [
         {
           role: "system",

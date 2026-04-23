@@ -19,6 +19,11 @@ type ChatCompletionToolCall = {
 };
 
 type ChatCompletionResponse = {
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
   choices?: Array<{
     message?: {
       content?: string | null;
@@ -100,6 +105,13 @@ export class HttpChatCompletionsProvider implements MathModelProvider {
 
     return {
       text: message?.content?.trim() || "",
+      provider: "http",
+      model: this.model,
+      usage: {
+        inputTokens: payload.usage?.prompt_tokens ?? null,
+        outputTokens: payload.usage?.completion_tokens ?? null,
+        totalTokens: payload.usage?.total_tokens ?? null,
+      },
       raw: payload,
       toolCall:
         functionCall?.name && functionCall.arguments

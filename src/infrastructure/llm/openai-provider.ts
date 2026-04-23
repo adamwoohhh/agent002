@@ -42,6 +42,13 @@ export class OpenAIResponsesProvider implements MathModelProvider {
     const functionCall = response.output.find((item) => item.type === "function_call");
     return {
       text: response.output_text || "",
+      provider: "openai",
+      model: this.model,
+      usage: {
+        inputTokens: response.usage?.input_tokens ?? null,
+        outputTokens: response.usage?.output_tokens ?? null,
+        totalTokens: response.usage?.total_tokens ?? null,
+      },
       raw: response,
       toolCall:
         functionCall && "name" in functionCall && "arguments" in functionCall

@@ -1,4 +1,6 @@
 import type { ConversationMessage, MathModelProvider } from "../../../infrastructure/llm/types.js";
+import type { RunLogger } from "../../../infrastructure/observability/run-logger.js";
+import { generateWithLogging } from "../../../infrastructure/observability/model-call-logger.js";
 import type { ConversationState } from "../types.js";
 
 export type ConversationInputAnalysis = {
@@ -17,7 +19,10 @@ export function createEmptyConversationState(): ConversationState {
 }
 
 export class ConversationStateManager {
-  constructor(private readonly provider?: MathModelProvider) {}
+  constructor(
+    private readonly provider?: MathModelProvider,
+    private readonly logger?: RunLogger,
+  ) {}
 
   createInitialState(): ConversationState {
     return createEmptyConversationState();
@@ -27,8 +32,9 @@ export class ConversationStateManager {
     state: ConversationState,
     input: string,
     turnMode: "new_question" | "supplement",
+    parentEventId?: string,
   ): Promise<{ state: ConversationState; analysis: ConversationInputAnalysis }> {
-    const analysis = await analyzeConversationInput(this.provider, input, turnMode);
+    const analysis = await analyzeConversationInput(this.provider, input, turnMode, this.logger, parentEventId);
 
     if (turnMode === "new_question") {
       return {
@@ -113,6 +119,8 @@ export async function analyzeConversationInput(
   provider: MathModelProvider | undefined,
   input: string,
   turnMode: "new_question" | "supplement",
+  logger?: RunLogger,
+  parentEventId?: string,
 ): Promise<ConversationInputAnalysis> {
   const fallbackBase = {
     pendingQuestion: extractPendingQuestion(input),
@@ -128,7 +136,11 @@ export async function analyzeConversationInput(
   }
 
   try {
-    const response = await provider.generate({
+    const response = await generateWithLogging({
+      provider,
+      logger,
+      parentEventId,
+      purpose: "analyze_conversation_input",
       messages: [
         {
           role: "system",

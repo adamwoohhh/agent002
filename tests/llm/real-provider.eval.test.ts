@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createMathModelProvider } from "../../src/llm/index.js";
-import { MathChatSession, runMathAgent } from "../../src/agent.js";
+import { MathChatSession, runMathAgent } from "../helpers/math-agent-test-helpers.js";
 
 const shouldRun = process.env.AGX_ENABLE_LLM_EVALS === "1";
 const llmTest = shouldRun ? test : test.skip;

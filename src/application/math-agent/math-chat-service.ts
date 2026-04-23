@@ -1,5 +1,6 @@
 import type { AppConfig } from "../../infrastructure/config/app-config.js";
 import type { MathModelProvider } from "../../infrastructure/llm/types.js";
+import { createEventId } from "../../infrastructure/observability/event-tree.js";
 import { JsonlRunLogger } from "../../infrastructure/observability/jsonl-run-logger.js";
 import { AgentRuntime } from "../../platform/runtime/agent-runtime.js";
 import { CapabilityRegistry } from "../../platform/runtime/capability.js";
@@ -10,7 +11,7 @@ import type { ConversationState } from "./types.js";
 export class MathChatService {
   private state: ConversationState = createEmptyConversationState();
   private loggerPromise: Promise<JsonlRunLogger> | null = null;
-  private readonly conversationStateManager: ConversationStateManager;
+  private conversationStateManager: ConversationStateManager;
 
   constructor(
     private readonly config: AppConfig,
@@ -21,24 +22,30 @@ export class MathChatService {
 
   async respond(input: string): Promise<string> {
     const logger = await this.getLogger();
+    this.conversationStateManager = new ConversationStateManager(this.provider, logger);
     const capability = new MathCapability(this.config, this.provider, logger);
     const stateBeforeTurn = snapshotConversationState(this.state);
+    const runRootEventId = createEventId();
 
     await logger.write({
       type: "run_started",
       timestamp: new Date().toISOString(),
       runId: logger.runId,
+      eventId: runRootEventId,
       input,
       phase: "session_turn",
       stateBeforeTurn,
     });
 
     // 轮次识别，判断会话中本次用户的输入是否是个新问题 or 当前问题的补充信息
-    const turnMode = await this.resolveTurnMode(input, capability);
+    const turnModeEventId = createEventId();
+    const turnMode = await this.resolveTurnMode(input, capability, turnModeEventId);
     await logger.write({
       type: "session_event",
       timestamp: new Date().toISOString(),
       runId: logger.runId,
+      eventId: turnModeEventId,
+      parentEventId: runRootEventId,
       event: "turn_mode_resolved",
       input,
       turnMode,
@@ -46,18 +53,38 @@ export class MathChatService {
     });
 
     // 提取出本次用户输入中的问题和事实信息
-    const turnPreparation = await this.conversationStateManager.beginTurn(this.state, input, turnMode);
+    const analysisEventId = createEventId();
+    const turnPreparation = await this.conversationStateManager.beginTurn(
+      this.state,
+      input,
+      turnMode,
+      analysisEventId,
+    );
     this.state = turnPreparation.state;
 
     await logger.write({
       type: "session_event",
       timestamp: new Date().toISOString(),
       runId: logger.runId,
+      eventId: analysisEventId,
+      parentEventId: runRootEventId,
       event: "conversation_input_analyzed",
       input,
       turnMode,
       analysis: turnPreparation.analysis,
       stateAfterPreparation: snapshotConversationState(this.state),
+    });
+
+    const graphSessionEventId = createEventId();
+    await logger.write({
+      type: "session_event",
+      timestamp: new Date().toISOString(),
+      runId: logger.runId,
+      eventId: graphSessionEventId,
+      parentEventId: runRootEventId,
+      event: "graph_execution",
+      input,
+      stateBeforeGraph: snapshotConversationState(this.state),
     });
 
     const registry = new CapabilityRegistry();
@@ -71,16 +98,20 @@ export class MathChatService {
         factMemory: this.state.factMemory,
         turnMode,
         lastClarificationQuestion: this.state.lastClarificationQuestion,
+        graphParentEventId: graphSessionEventId,
       },
     });
 
     const answer = result.output;
     this.state = this.conversationStateManager.completeTurn(this.state, input, answer);
+    const stateUpdatedEventId = createEventId();
 
     await logger.write({
       type: "session_event",
       timestamp: new Date().toISOString(),
       runId: logger.runId,
+      eventId: stateUpdatedEventId,
+      parentEventId: runRootEventId,
       event: "conversation_state_updated",
       input,
       answer,
@@ -90,6 +121,8 @@ export class MathChatService {
       type: "run_completed",
       timestamp: new Date().toISOString(),
       runId: logger.runId,
+      eventId: createEventId(),
+      parentEventId: runRootEventId,
       finalAnswer: answer,
       finalState: snapshotConversationState(this.state),
       phase: "session_turn",
@@ -109,7 +142,11 @@ export class MathChatService {
     return this.loggerPromise;
   }
 
-  private async resolveTurnMode(input: string, capability: MathCapability): Promise<"new_question" | "supplement"> {
+  private async resolveTurnMode(
+    input: string,
+    capability: MathCapability,
+    parentEventId?: string,
+  ): Promise<"new_question" | "supplement"> {
     if (!this.state.pendingQuestion) {
       return "new_question";
     }
@@ -120,7 +157,7 @@ export class MathChatService {
         pendingQuestion: this.state.pendingQuestion,
         factMemory: this.state.factMemory,
         lastClarificationQuestion: this.state.lastClarificationQuestion,
-      });
+      }, parentEventId);
     } catch {
       return fallbackResolveTurnMode(
         input,

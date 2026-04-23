@@ -18,8 +18,8 @@ export class MathCapability implements Capability {
     private readonly provider: MathModelProvider,
     private readonly logger: RunLogger,
   ) {
-    this.decisionService = new MathDecisionService(provider);
-    this.answerRenderer = new MathAnswerRenderer(provider);
+    this.decisionService = new MathDecisionService(provider, logger);
+    this.answerRenderer = new MathAnswerRenderer(provider, logger);
   }
 
   async handle(input: string, context?: RunContext): Promise<CapabilityResult> {
@@ -39,6 +39,10 @@ export class MathCapability implements Capability {
       answerRenderer: this.answerRenderer,
       input,
       context: conversationContext,
+      parentEventId:
+        typeof context?.metadata?.graphParentEventId === "string"
+          ? context.metadata.graphParentEventId
+          : undefined,
     });
 
     return {
@@ -48,19 +52,6 @@ export class MathCapability implements Capability {
         finalState: result.finalState,
       },
     };
-  }
-
-  async run(input: string, context: MathConversationContext = {}): Promise<string> {
-    const result = await executeMathGraph({
-      config: this.config,
-      logger: this.logger,
-      decisionService: this.decisionService,
-      answerRenderer: this.answerRenderer,
-      input,
-      context,
-    });
-
-    return result.finalAnswer;
   }
 
   getDecisionService(): MathDecisionService {

@@ -23,6 +23,13 @@ export type ModelToolCall = {
 export type ModelResponse = {
   text: string;
   toolCall?: ModelToolCall;
+  usage?: {
+    inputTokens: number | null;
+    outputTokens: number | null;
+    totalTokens: number | null;
+  };
+  provider?: string;
+  model?: string;
   raw?: unknown;
 };
 

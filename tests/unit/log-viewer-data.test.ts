@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  buildEventTree,
   listLogFiles,
   parseJsonlContent,
   resolveLogFilePath,
@@ -33,6 +34,22 @@ test("parseJsonlContent parses valid events and builds summary", () => {
     { type: "run_completed", count: 1 },
     { type: "run_started", count: 1 },
   ]);
+  assert.equal(parsed.eventTree.length, 3);
+});
+
+test("buildEventTree nests child events under parent event ids", () => {
+  const tree = buildEventTree([
+    { sequence: 0, type: "run_started", eventId: "root" },
+    { sequence: 1, type: "session_event", eventId: "session-1", parentEventId: "root" },
+    { sequence: 2, type: "graph_event", eventId: "graph-1", parentEventId: "session-1" },
+    { sequence: 3, type: "model_call", eventId: "model-1", parentEventId: "graph-1" },
+  ]);
+
+  assert.equal(tree.length, 1);
+  assert.equal(tree[0]?.event.eventId, "root");
+  assert.equal(tree[0]?.children[0]?.event.eventId, "session-1");
+  assert.equal(tree[0]?.children[0]?.children[0]?.event.eventId, "graph-1");
+  assert.equal(tree[0]?.children[0]?.children[0]?.children[0]?.event.eventId, "model-1");
 });
 
 test("parseJsonlContent keeps going when a line is malformed", () => {

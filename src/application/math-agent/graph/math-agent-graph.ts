@@ -10,6 +10,7 @@ import {
 import * as z from "zod";
 
 import { mathOperations, normalizeMathInput } from "../../../domain/math/operations.js";
+import { createEventId } from "../../../infrastructure/observability/event-tree.js";
 import type { RunLogger } from "../../../infrastructure/observability/run-logger.js";
 import { createObservabilityCallbacks } from "../../../infrastructure/observability/fornax.js";
 import type { AppConfig } from "../../../infrastructure/config/app-config.js";
@@ -36,6 +37,7 @@ export const MathAgentStateSchema = new StateSchema({
   factMemory: z.array(z.string()),
   turnMode: z.enum(["new_question", "supplement"]).nullable(),
   lastClarificationQuestion: z.string().nullable(),
+  graphParentEventId: z.string().nullable(),
 });
 
 export type CompiledMathGraphDeps = {
@@ -60,9 +62,13 @@ export function buildMathAgentGraph(deps: CompiledMathGraphDeps) {
   const decideIntent: GraphNode<typeof MathAgentStateSchema> = createLoggedNode(
     "decideIntent",
     deps.logger,
-    async (state) => {
+    async (state, eventId) => {
       try {
-        const toolDecision = await deps.decisionService.chooseMathTool(state.normalizedInput, stateToContext(state));
+        const toolDecision = await deps.decisionService.chooseMathTool(
+          state.normalizedInput,
+          stateToContext(state),
+          eventId,
+        );
 
         if (toolDecision.kind === "clarify") {
           return {
@@ -133,7 +139,7 @@ export function buildMathAgentGraph(deps: CompiledMathGraphDeps) {
   const renderAnswer: GraphNode<typeof MathAgentStateSchema> = createLoggedNode(
     "renderAnswer",
     deps.logger,
-    async (state) => {
+    async (state, eventId) => {
       if (state.finalAnswer || state.clarificationQuestion) {
         return {
           messages: [new AIMessage("结果已整理完成。")],
@@ -154,7 +160,7 @@ export function buildMathAgentGraph(deps: CompiledMathGraphDeps) {
           operation: state.operation,
           operands: [left, right],
           result: state.result,
-        });
+        }, eventId);
 
         return {
           finalAnswer: finalAnswer.trim() || fallbackAnswer,
@@ -189,6 +195,7 @@ export async function executeMathGraph(params: {
   answerRenderer: MathAnswerRenderer;
   input: string;
   context?: MathConversationContext;
+  parentEventId?: string;
 }): Promise<{ finalAnswer: string; finalState: MathGraphFinalState }> {
   const graph = buildMathAgentGraph({
     config: params.config,
@@ -211,6 +218,7 @@ export async function executeMathGraph(params: {
     factMemory: params.context?.factMemory ?? [],
     turnMode: params.context?.turnMode ?? null,
     lastClarificationQuestion: params.context?.lastClarificationQuestion ?? null,
+    graphParentEventId: params.parentEventId ?? null,
   };
 
   try {
@@ -243,6 +251,7 @@ export type MathGraphFinalState = {
   factMemory: string[];
   turnMode: "new_question" | "supplement" | null;
   lastClarificationQuestion: string | null;
+  graphParentEventId: string | null;
 };
 
 function stateToContext(state: MathGraphFinalState): MathConversationContext {
@@ -258,17 +267,22 @@ function stateToContext(state: MathGraphFinalState): MathConversationContext {
 function createLoggedNode(
   nodeName: string,
   logger: RunLogger | undefined,
-  node: GraphNode<typeof MathAgentStateSchema>,
+  node: (
+    state: Parameters<GraphNode<typeof MathAgentStateSchema>>[0],
+    eventId: string,
+  ) => ReturnType<GraphNode<typeof MathAgentStateSchema>>,
 ): GraphNode<typeof MathAgentStateSchema> {
-  return async (...args) => {
-    const [state] = args;
+  return async (state) => {
+    const eventId = createEventId();
     const input = summarizeGraphState(state as MathGraphFinalState);
-    const output = await node(...args);
+    const output = await node(state, eventId);
 
     await logger?.write({
       type: "graph_event",
       timestamp: new Date().toISOString(),
       runId: logger.runId,
+      eventId,
+      parentEventId: (state as MathGraphFinalState).graphParentEventId,
       event: "node_execution",
       node: nodeName,
       input,

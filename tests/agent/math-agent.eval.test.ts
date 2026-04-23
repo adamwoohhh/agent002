@@ -4,7 +4,6 @@ import { mkdtemp, readdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { MathChatSession, runMathAgent } from "../../src/agent.js";
 import type { MathToolDecision } from "../../src/math.js";
 import type {
   ConversationMessage,
@@ -13,6 +12,7 @@ import type {
   ModelResponse,
   ModelTool,
 } from "../../src/llm/types.js";
+import { MathChatSession, runMathAgent } from "../helpers/math-agent-test-helpers.js";
 
 class StubProvider implements MathModelProvider {
   constructor(
@@ -491,6 +491,9 @@ test("agent writes node execution details to one jsonl file per run", async () =
 
       assert.equal(logLines[0].type, "run_started");
       assert.equal(logLines.at(-1)?.type, "run_completed");
+      const sessionEvents = logLines.filter((line) => line.type === "session_event");
+      assert.equal(sessionEvents.length, 1);
+      assert.equal(sessionEvents[0].event, "graph_execution");
       const graphEvents = logLines.filter((line) => line.type === "graph_event");
       assert.equal(graphEvents.length, 4);
       assert.deepEqual(
@@ -499,6 +502,10 @@ test("agent writes node execution details to one jsonl file per run", async () =
       );
       assert.ok(graphEvents.every((line) => line.event === "node_execution"));
       assert.ok(graphEvents.every((line) => "input" in line && "output" in line));
+      assert.ok(graphEvents.every((line) => line.parentEventId === sessionEvents[0].eventId));
+      const modelCalls = logLines.filter((line) => line.type === "model_call");
+      assert.ok(modelCalls.length >= 2);
+      assert.ok(modelCalls.every((line) => "parentEventId" in line));
     },
   );
 });
@@ -586,16 +593,21 @@ test("chat session writes all turns into one shared jsonl file", async () => {
         logLines.filter((line) => line.type === "run_completed").length,
         2,
       );
+      const modelCalls = logLines.filter((line) => line.type === "model_call");
+      assert.ok(modelCalls.length >= 4);
+      assert.ok(modelCalls.every((line) => "parentEventId" in line));
       const sessionEvents = logLines.filter((line) => line.type === "session_event");
-      assert.equal(sessionEvents.length, 6);
+      assert.equal(sessionEvents.length, 8);
       assert.deepEqual(
         sessionEvents.map((line) => line.event),
         [
           "turn_mode_resolved",
           "conversation_input_analyzed",
+          "graph_execution",
           "conversation_state_updated",
           "turn_mode_resolved",
           "conversation_input_analyzed",
+          "graph_execution",
           "conversation_state_updated",
         ],
       );

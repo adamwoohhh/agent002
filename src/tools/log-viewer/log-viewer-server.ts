@@ -87,6 +87,7 @@ function serializeLogDetail(fileName: string, filePath: string, parsed: ParsedLo
     path: filePath,
     summary: parsed.summary,
     events: parsed.events,
+    eventTree: parsed.eventTree,
     parseErrors: parsed.parseErrors,
   };
 }
@@ -275,6 +276,17 @@ function renderAppHtml(): string {
         border-radius: 14px;
         padding: 12px;
         cursor: pointer;
+      }
+
+      .event-tree {
+        display: grid;
+        gap: 8px;
+      }
+
+      .event-children {
+        display: grid;
+        gap: 8px;
+        margin-top: 8px;
       }
 
       .file-item:hover, .event-row:hover { background: rgba(255,255,255,0.55); }
@@ -569,37 +581,15 @@ function renderAppHtml(): string {
           return;
         }
 
-        const filteredEvents = detail.events.filter((event) => {
-          if (state.filters.type && event.type !== state.filters.type) {
-            return false;
-          }
-          if (state.filters.mode && event.mode !== state.filters.mode) {
-            return false;
-          }
-          if (state.filters.keyword) {
-            return JSON.stringify(event).toLowerCase().includes(state.filters.keyword);
-          }
-          return true;
-        });
+        const filteredTree = filterEventTree(detail.eventTree ?? buildEventTree(detail.events), matchesEventFilters);
+        const visibleNodes = flattenEventTree(filteredTree);
 
-        eventCountLabel.textContent = '显示 ' + filteredEvents.length + ' / ' + detail.events.length + ' 条事件';
+        eventCountLabel.textContent = '显示 ' + visibleNodes.length + ' / ' + detail.events.length + ' 条事件';
 
-        if (filteredEvents.length === 0) {
+        if (visibleNodes.length === 0) {
           eventList.innerHTML = '<div class="empty">没有匹配当前过滤条件的事件。</div>';
         } else {
-          eventList.innerHTML = filteredEvents.map((event, index) => {
-            const originalIndex = detail.events.indexOf(event);
-            const selected = originalIndex === state.selectedEventIndex ? 'selected' : '';
-            const sequence = event.sequence ?? '-';
-            const timestamp = formatMaybeDate(event.timestamp);
-            return '<div class="event-row ' + selected + '" data-index="' + originalIndex + '">' +
-              '<strong>#' + escapeHtml(String(sequence)) + ' ' + escapeHtml(event.type ?? 'unknown') + '</strong>' +
-              '<div class="event-meta">' +
-                '<span>' + escapeHtml(timestamp) + '</span>' +
-                (event.mode ? '<span class="badge">' + escapeHtml(event.mode) + '</span>' : '') +
-              '</div>' +
-            '</div>';
-          }).join('');
+          eventList.innerHTML = '<div class="event-tree">' + renderEventTree(filteredTree, 0) + '</div>';
         }
 
         if ((detail.parseErrors ?? []).length > 0) {
@@ -617,6 +607,98 @@ function renderAppHtml(): string {
         }
 
         renderDetail();
+      }
+
+      function matchesEventFilters(event) {
+        if (state.filters.type && event.type !== state.filters.type) {
+          return false;
+        }
+        if (state.filters.mode && event.mode !== state.filters.mode) {
+          return false;
+        }
+        if (state.filters.keyword) {
+          return JSON.stringify(event).toLowerCase().includes(state.filters.keyword);
+        }
+        return true;
+      }
+
+      function filterEventTree(nodes, predicate) {
+        return nodes.flatMap((node) => {
+          const filteredChildren = filterEventTree(node.children ?? [], predicate);
+          const matches = predicate(node.event);
+          if (!matches && filteredChildren.length === 0) {
+            return [];
+          }
+          return [{
+            ...node,
+            children: filteredChildren,
+          }];
+        });
+      }
+
+      function flattenEventTree(nodes) {
+        return nodes.flatMap((node) => [node, ...flattenEventTree(node.children ?? [])]);
+      }
+
+      function renderEventTree(nodes, depth) {
+        return nodes.map((node) => {
+          const event = node.event;
+          const selected = node.index === state.selectedEventIndex ? 'selected' : '';
+          const sequence = event.sequence ?? '-';
+          const timestamp = formatMaybeDate(event.timestamp);
+          const indent = 12 + depth * 20;
+          const childrenHtml = (node.children && node.children.length > 0)
+            ? '<div class="event-children">' + renderEventTree(node.children, depth + 1) + '</div>'
+            : '';
+
+          return '<div>' +
+            '<div class="event-row ' + selected + '" data-index="' + node.index + '" style="margin-left:' + indent + 'px">' +
+              '<strong>#' + escapeHtml(String(sequence)) + ' ' + escapeHtml(event.type ?? 'unknown') + '</strong>' +
+              '<div class="event-meta">' +
+                '<span>' + escapeHtml(timestamp) + '</span>' +
+                (event.mode ? '<span class="badge">' + escapeHtml(event.mode) + '</span>' : '') +
+                (event.eventId ? '<span class="badge">id</span>' : '') +
+              '</div>' +
+            '</div>' +
+            childrenHtml +
+          '</div>';
+        }).join('');
+      }
+
+      function buildEventTree(events) {
+        const nodes = events.map((event, index) => ({
+          event,
+          index,
+          children: [],
+        }));
+        const byEventId = new Map();
+
+        for (const node of nodes) {
+          if (typeof node.event.eventId === 'string' && node.event.eventId) {
+            byEventId.set(node.event.eventId, node);
+          }
+        }
+
+        const roots = [];
+        for (const node of nodes) {
+          const parentEventId = typeof node.event.parentEventId === 'string' && node.event.parentEventId
+            ? node.event.parentEventId
+            : null;
+          if (!parentEventId) {
+            roots.push(node);
+            continue;
+          }
+
+          const parent = byEventId.get(parentEventId);
+          if (!parent || parent === node) {
+            roots.push(node);
+            continue;
+          }
+
+          parent.children.push(node);
+        }
+
+        return roots;
       }
 
       function renderDetail() {
