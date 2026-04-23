@@ -39,10 +39,11 @@ export class AgentRuntime {
         status: "rejected",
         output: decision.reason,
       };
-      await this.logger?.write({
+      await this.logger?.policyRejected({
         type: "policy_rejected",
         timestamp: new Date().toISOString(),
         runId: this.logger.runId,
+        parentEventId: getRuntimeParentEventId(context),
         task,
         reason: decision.reason,
       });
@@ -62,10 +63,11 @@ export class AgentRuntime {
       output: result.output,
     };
 
-    await this.logger?.write({
+    await this.logger?.runtimeTaskCompleted({
       type: "runtime_task_completed",
       timestamp: new Date().toISOString(),
       runId: this.logger.runId,
+      parentEventId: getRuntimeParentEventId(context),
       task,
       run,
       metadata: result.metadata,
@@ -78,4 +80,10 @@ export class AgentRuntime {
       metadata: result.metadata,
     };
   }
+}
+
+function getRuntimeParentEventId(context?: RunContext): string | undefined {
+  return typeof context?.metadata?.graphParentEventId === "string"
+    ? context.metadata.graphParentEventId
+    : undefined;
 }

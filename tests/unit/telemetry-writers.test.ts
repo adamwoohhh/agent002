@@ -21,7 +21,7 @@ test("LocalJsonlTelemetryWriter preserves jsonl event contract", async () => {
       logDirectory: tempRoot,
     });
 
-    await writer.write({
+    await writer.runStarted({
       type: "run_started",
       timestamp: "2026-04-23T00:00:00.000Z",
       runId: writer.runId,
@@ -32,7 +32,12 @@ test("LocalJsonlTelemetryWriter preserves jsonl event contract", async () => {
     const content = await readFile(writer.filePath, "utf8");
     const parsed = JSON.parse(content.trim());
     assert.equal(parsed.sequence, 0);
+    assert.equal(parsed.recordType, "span_event");
+    assert.equal(parsed.stage, "start");
     assert.equal(parsed.type, "run_started");
+    assert.equal(parsed.name, "agent_run");
+    assert.equal(parsed.spanType, "agent");
+    assert.equal(parsed.spanId, "root");
     assert.equal(parsed.runId, "run-1");
     assert.equal(parsed.eventId, "root");
   } finally {
@@ -44,18 +49,36 @@ test("CompositeTelemetryWriter writes to every sink and swallows sink failures",
   const seenEvents: TelemetryEvent[] = [];
   const goodSink: TelemetryWriter = {
     runId: "run-1",
-    async write(event) {
+    async runStarted(event) {
       seenEvents.push(event);
     },
+    async runCompleted() {},
+    async runFailed() {},
+    async sessionEvent(event) {
+      seenEvents.push(event);
+    },
+    async graphEvent() {},
+    async modelCall() {},
+    async policyRejected() {},
+    async runtimeTaskCompleted() {},
     async flush() {
       seenEvents.push({ type: "flush", timestamp: "now" });
     },
   };
   const badSink: TelemetryWriter = {
     runId: "run-1",
-    async write() {
+    async runStarted() {
       throw new Error("sink failed");
     },
+    async runCompleted() {},
+    async runFailed() {},
+    async sessionEvent() {
+      throw new Error("sink failed");
+    },
+    async graphEvent() {},
+    async modelCall() {},
+    async policyRejected() {},
+    async runtimeTaskCompleted() {},
   };
 
   const writer = new CompositeTelemetryWriter("run-1", undefined, [goodSink, badSink]);
@@ -63,7 +86,7 @@ test("CompositeTelemetryWriter writes to every sink and swallows sink failures",
   console.error = () => {};
 
   try {
-    await writer.write({
+    await writer.sessionEvent({
       type: "session_event",
       timestamp: "2026-04-23T00:00:00.000Z",
       runId: "run-1",
@@ -86,7 +109,7 @@ test("FornaxTelemetryWriter maps event tree into nested spans and records usage"
   });
   const writer = new FornaxTelemetryWriter("run-1", config, tracer as unknown as FornaxTracerLike);
 
-  await writer.write({
+  await writer.runStarted({
     type: "run_started",
     timestamp: "2026-04-23T00:00:00.000Z",
     runId: "run-1",
@@ -94,7 +117,8 @@ test("FornaxTelemetryWriter maps event tree into nested spans and records usage"
     input: "12 加 8",
     phase: "direct_run",
   });
-  await writer.write({
+  assert.equal(started[0]?.ended, true);
+  await writer.modelCall({
     type: "model_call",
     timestamp: "2026-04-23T00:00:01.000Z",
     runId: "run-1",
@@ -104,9 +128,9 @@ test("FornaxTelemetryWriter maps event tree into nested spans and records usage"
     input: { messages: [{ role: "user", contentPreview: "12 加 8" }] },
     provider: "stub",
     model: "stub-model",
-    usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+    usage: { inputTokens: 10, outputTokens: 5, reasoningTokens: 2, totalTokens: 15 },
   });
-  await writer.write({
+  await writer.graphEvent({
     type: "graph_event",
     timestamp: "2026-04-23T00:00:02.000Z",
     runId: "run-1",
@@ -117,7 +141,7 @@ test("FornaxTelemetryWriter maps event tree into nested spans and records usage"
     input: { normalizedInput: "12 加 8" },
     output: { operation: "add" },
   });
-  await writer.write({
+  await writer.runCompleted({
     type: "run_completed",
     timestamp: "2026-04-23T00:00:03.000Z",
     runId: "run-1",
@@ -138,9 +162,13 @@ test("FornaxTelemetryWriter maps event tree into nested spans and records usage"
   assert.deepEqual((started[2]?.output as { usage?: unknown } | undefined)?.usage, {
     inputTokens: 10,
     outputTokens: 5,
+    reasoningTokens: 2,
     totalTokens: 15,
   });
-  assert.equal(started[0]?.ended, true);
+  assert.equal(started[2]?.tags.input_tokens, 10);
+  assert.equal(started[2]?.tags.output_tokens, 5);
+  assert.equal(started[2]?.tags.reasoning_tokens, 2);
+  assert.equal(started[2]?.tags.tokens, 15);
   assert.equal(tracer.forceFlushCalls, 1);
   assert.equal(tracer.shutdownCalls, 1);
 });

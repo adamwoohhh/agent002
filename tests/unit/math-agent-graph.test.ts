@@ -54,7 +54,14 @@ test("executeMathGraph preserves explicit conversation context in final state", 
 
   const logger = {
     runId: "test-run",
-    async write() {},
+    async runStarted() {},
+    async runCompleted() {},
+    async runFailed() {},
+    async sessionEvent() {},
+    async graphEvent() {},
+    async modelCall() {},
+    async policyRejected() {},
+    async runtimeTaskCompleted() {},
   };
 
   const result = await executeMathGraph({

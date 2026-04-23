@@ -13,6 +13,7 @@ export type AgentResult = {
 export interface AgentSession {
   respond(input: string): Promise<string>;
   getHistory(): Array<{ role: "user" | "assistant"; content: string }>;
+  close(): Promise<void>;
 }
 
 export interface AgentApp {
@@ -39,5 +40,5 @@ export function createAgentApp(config: AppConfig): AgentApp {
     createSession(): AgentSession {
       return new MathChatService(config, provider);
     },
-  };
+  }; 
 }

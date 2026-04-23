@@ -647,16 +647,21 @@ function renderAppHtml(): string {
           const sequence = event.sequence ?? '-';
           const timestamp = formatMaybeDate(event.timestamp);
           const indent = 12 + depth * 20;
+          const title = event.name
+            ? event.name + (event.spanType ? ' [' + event.spanType + ']' : '')
+            : (event.type ?? 'unknown');
           const childrenHtml = (node.children && node.children.length > 0)
             ? '<div class="event-children">' + renderEventTree(node.children, depth + 1) + '</div>'
             : '';
 
           return '<div>' +
             '<div class="event-row ' + selected + '" data-index="' + node.index + '" style="margin-left:' + indent + 'px">' +
-              '<strong>#' + escapeHtml(String(sequence)) + ' ' + escapeHtml(event.type ?? 'unknown') + '</strong>' +
+              '<strong>#' + escapeHtml(String(sequence)) + ' ' + escapeHtml(title) + '</strong>' +
               '<div class="event-meta">' +
                 '<span>' + escapeHtml(timestamp) + '</span>' +
+                (event.type ? '<span class="badge">' + escapeHtml(event.type) + '</span>' : '') +
                 (event.mode ? '<span class="badge">' + escapeHtml(event.mode) + '</span>' : '') +
+                (event.status ? '<span class="badge">' + escapeHtml(event.status) + '</span>' : '') +
                 (event.eventId ? '<span class="badge">id</span>' : '') +
               '</div>' +
             '</div>' +
@@ -709,7 +714,10 @@ function renderAppHtml(): string {
           return;
         }
 
-        detailLabel.textContent = (event.type ?? 'unknown') + ' #' + (event.sequence ?? '-');
+        const title = event.name
+          ? event.name + (event.spanType ? ' [' + event.spanType + ']' : '')
+          : (event.type ?? 'unknown');
+        detailLabel.textContent = title + ' #' + (event.sequence ?? '-');
         detailPanel.innerHTML = '<pre>' + escapeHtml(JSON.stringify(event, null, 2)) + '</pre>';
       }
 

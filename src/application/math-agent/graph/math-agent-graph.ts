@@ -274,7 +274,7 @@ function createLoggedNode(
     const input = summarizeGraphState(state as MathGraphFinalState);
     const output = await node(state, eventId);
 
-    await logger?.write({
+    await logger?.graphEvent({
       type: "graph_event",
       timestamp: new Date().toISOString(),
       runId: logger.runId,

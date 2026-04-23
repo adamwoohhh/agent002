@@ -12,6 +12,7 @@ import type { ConversationState } from "./types.js";
 export class MathChatService {
   private state: ConversationState = createEmptyConversationState();
   private loggerPromise: Promise<TelemetryWriter> | null = null;
+  private sessionRootEventId: string | null = null;
   private conversationStateManager: ConversationStateManager;
 
   constructor(
@@ -23,16 +24,18 @@ export class MathChatService {
 
   async respond(input: string): Promise<string> {
     const logger = await this.getLogger();
+    const sessionRootEventId = await this.ensureSessionRoot(logger);
     this.conversationStateManager = new ConversationStateManager(this.provider, logger);
     const capability = new MathCapability(this.config, this.provider, logger);
     const stateBeforeTurn = snapshotConversationState(this.state);
     const runRootEventId = createEventId();
 
-    await logger.write({
+    await logger.runStarted({
       type: "run_started",
       timestamp: new Date().toISOString(),
       runId: logger.runId,
       eventId: runRootEventId,
+      parentEventId: sessionRootEventId,
       input,
       phase: "session_turn",
       stateBeforeTurn,
@@ -41,7 +44,7 @@ export class MathChatService {
     // 轮次识别，判断会话中本次用户的输入是否是个新问题 or 当前问题的补充信息
     const turnModeEventId = createEventId();
     const turnMode = await this.resolveTurnMode(input, capability, turnModeEventId);
-    await logger.write({
+    await logger.sessionEvent({
       type: "session_event",
       timestamp: new Date().toISOString(),
       runId: logger.runId,
@@ -63,7 +66,7 @@ export class MathChatService {
     );
     this.state = turnPreparation.state;
 
-    await logger.write({
+    await logger.sessionEvent({
       type: "session_event",
       timestamp: new Date().toISOString(),
       runId: logger.runId,
@@ -77,7 +80,7 @@ export class MathChatService {
     });
 
     const graphSessionEventId = createEventId();
-    await logger.write({
+    await logger.sessionEvent({
       type: "session_event",
       timestamp: new Date().toISOString(),
       runId: logger.runId,
@@ -107,7 +110,7 @@ export class MathChatService {
     this.state = this.conversationStateManager.completeTurn(this.state, input, answer);
     const stateUpdatedEventId = createEventId();
 
-    await logger.write({
+    await logger.sessionEvent({
       type: "session_event",
       timestamp: new Date().toISOString(),
       runId: logger.runId,
@@ -118,7 +121,7 @@ export class MathChatService {
       answer,
       stateAfterTurn: snapshotConversationState(this.state),
     });
-    await logger.write({
+    await logger.runCompleted({
       type: "run_completed",
       timestamp: new Date().toISOString(),
       runId: logger.runId,
@@ -136,9 +139,50 @@ export class MathChatService {
     return [...this.state.history];
   }
 
+  async close(): Promise<void> {
+    const logger = await this.loggerPromise;
+    if (!logger) {
+      return;
+    }
+
+    if (this.sessionRootEventId) {
+      await logger.runCompleted({
+        type: "run_completed",
+        timestamp: new Date().toISOString(),
+        runId: logger.runId,
+        eventId: createEventId(),
+        parentEventId: this.sessionRootEventId,
+        finalState: snapshotConversationState(this.state),
+        phase: "session_lifecycle",
+      });
+      this.sessionRootEventId = null;
+    }
+
+    await logger.flush?.();
+    await logger.shutdown?.();
+  }
+
   private getLogger(): Promise<TelemetryWriter> {
     this.loggerPromise ??= createTelemetryWriter("agx-chat", this.config);
     return this.loggerPromise;
+  }
+
+  private async ensureSessionRoot(logger: TelemetryWriter): Promise<string> {
+    if (this.sessionRootEventId) {
+      return this.sessionRootEventId;
+    }
+
+    const sessionRootEventId = createEventId();
+    await logger.runStarted({
+      type: "run_started",
+      timestamp: new Date().toISOString(),
+      runId: logger.runId,
+      eventId: sessionRootEventId,
+      phase: "session_lifecycle",
+      stateBeforeTurn: snapshotConversationState(this.state),
+    });
+    this.sessionRootEventId = sessionRootEventId;
+    return sessionRootEventId;
   }
 
   private async resolveTurnMode(

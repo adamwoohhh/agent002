@@ -47,6 +47,7 @@ export class OpenAIResponsesProvider implements MathModelProvider {
       usage: {
         inputTokens: response.usage?.input_tokens ?? null,
         outputTokens: response.usage?.output_tokens ?? null,
+        reasoningTokens: response.usage?.output_tokens_details?.reasoning_tokens ?? null,
         totalTokens: response.usage?.total_tokens ?? null,
       },
       raw: response,

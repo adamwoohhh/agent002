@@ -110,6 +110,7 @@ export class HttpChatCompletionsProvider implements MathModelProvider {
       usage: {
         inputTokens: payload.usage?.prompt_tokens ?? null,
         outputTokens: payload.usage?.completion_tokens ?? null,
+        reasoningTokens: null,
         totalTokens: payload.usage?.total_tokens ?? null,
       },
       raw: payload,

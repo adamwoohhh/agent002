@@ -16,7 +16,7 @@ export async function generateWithLogging(params: {
       tools: params.tools,
     });
 
-    await params.logger?.write({
+    await params.logger?.modelCall({
       type: "model_call",
       timestamp: new Date().toISOString(),
       runId: params.logger.runId,
@@ -32,7 +32,7 @@ export async function generateWithLogging(params: {
 
     return response;
   } catch (error) {
-    await params.logger?.write({
+    await params.logger?.modelCall({
       type: "model_call",
       timestamp: new Date().toISOString(),
       runId: params.logger.runId,

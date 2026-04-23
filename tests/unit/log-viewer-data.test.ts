@@ -67,6 +67,25 @@ test("parseJsonlContent keeps going when a line is malformed", () => {
   assert.equal(parsed.parseErrors[0]?.lineNumber, 2);
 });
 
+test("parseJsonlContent normalizes span_event jsonl into viewer events", () => {
+  const parsed = parseJsonlContent(
+    [
+      '{"sequence":0,"recordType":"span_event","stage":"start","timestamp":"2026-04-22T07:57:10.549Z","runId":"demo-run","spanId":"root","name":"agent_run","spanType":"agent","status":"open","type":"run_started"}',
+      '{"sequence":1,"recordType":"span_event","stage":"instant","timestamp":"2026-04-22T07:57:11.000Z","runId":"demo-run","spanId":"graph-1","parentSpanId":"root","name":"graph:decideIntent","spanType":"agent","status":"completed","type":"graph_event"}',
+      '{"sequence":2,"recordType":"span_event","stage":"end","timestamp":"2026-04-22T07:57:12.000Z","runId":"demo-run","spanId":"root","name":"agent_run","spanType":"agent","status":"completed","type":"run_completed","output":{"finalAnswer":"20"}}',
+    ].join("\n"),
+    "agx-run-demo.jsonl",
+  );
+
+  assert.equal(parsed.events.length, 2);
+  assert.equal(parsed.events[0]?.eventId, "root");
+  assert.equal(parsed.events[0]?.name, "agent_run");
+  assert.equal(parsed.events[0]?.status, "completed");
+  assert.deepEqual(parsed.events[0]?.output, { finalAnswer: "20" });
+  assert.equal(parsed.eventTree.length, 1);
+  assert.equal(parsed.eventTree[0]?.children[0]?.event.name, "graph:decideIntent");
+});
+
 test("listLogFiles returns jsonl files with metadata and event counts", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "log-viewer-data-"));
   const logsDir = path.join(tempRoot, "logs");

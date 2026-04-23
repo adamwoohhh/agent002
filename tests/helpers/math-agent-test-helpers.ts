@@ -25,7 +25,7 @@ export async function runMathAgent(
   };
   const runRootEventId = createEventId();
 
-  await activeLogger.write({
+  await activeLogger.runStarted({
     type: "run_started",
     timestamp: new Date().toISOString(),
     runId: activeLogger.runId,
@@ -37,7 +37,7 @@ export async function runMathAgent(
 
   try {
     const graphSessionEventId = createEventId();
-    await activeLogger.write({
+    await activeLogger.sessionEvent({
       type: "session_event",
       timestamp: new Date().toISOString(),
       runId: activeLogger.runId,
@@ -60,7 +60,7 @@ export async function runMathAgent(
       },
     });
     const finalAnswer = result.output;
-    await activeLogger.write({
+    await activeLogger.runCompleted({
       type: "run_completed",
       timestamp: new Date().toISOString(),
       runId: activeLogger.runId,
@@ -72,7 +72,7 @@ export async function runMathAgent(
     await activeLogger.flush?.();
     return finalAnswer;
   } catch (error) {
-    await activeLogger.write({
+    await activeLogger.runFailed({
       type: "run_failed",
       timestamp: new Date().toISOString(),
       runId: activeLogger.runId,
@@ -99,5 +99,9 @@ export class MathChatSession {
 
   getHistory(): ConversationMessage[] {
     return this.service.getHistory();
+  }
+
+  async close(): Promise<void> {
+    await this.service.close();
   }
 }

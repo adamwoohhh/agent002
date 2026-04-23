@@ -50,6 +50,7 @@ async function runInteractiveChat(app: ReturnType<typeof createAgentApp>) {
       console.log(`助手> ${result}`);
     }
   } finally {
+    await session.close();
     rl.close();
   }
 }

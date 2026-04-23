@@ -26,6 +26,7 @@ export type ModelResponse = {
   usage?: {
     inputTokens: number | null;
     outputTokens: number | null;
+    reasoningTokens?: number | null;
     totalTokens: number | null;
   };
   provider?: string;

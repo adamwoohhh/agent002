@@ -574,6 +574,7 @@ test("chat session writes all turns into one shared jsonl file", async () => {
 
       assert.equal(await session.respond("12 加 8"), "12 + 8 = 20");
       assert.equal(await session.respond("结果再乘 2"), "20 * 2 = 40");
+      await session.close();
 
       const files = await readdir(logDir);
       assert.equal(files.length, 1);
@@ -587,11 +588,11 @@ test("chat session writes all turns into one shared jsonl file", async () => {
 
       assert.equal(
         logLines.filter((line) => line.type === "run_started").length,
-        2,
+        3,
       );
       assert.equal(
         logLines.filter((line) => line.type === "run_completed").length,
-        2,
+        3,
       );
       const modelCalls = logLines.filter((line) => line.type === "model_call");
       assert.ok(modelCalls.length >= 4);
