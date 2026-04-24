@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -455,77 +455,15 @@ test("chat session keeps pending question and fact memory across multiple clarif
 test("agent writes node execution details to one jsonl file per run", async () => {
   const logDir = await mkdtemp(path.join(os.tmpdir(), "agent002-run-logs-"));
 
-  await withEnv(
-    {
-      AGX_LOG_DIR: logDir,
-    },
-    async () => {
-      const provider = new StubProvider(({ tools }) => {
-        if (tools) {
-          return {
-            text: "",
-            toolCall: {
-              name: "add",
-              arguments: JSON.stringify({ left: 12, right: 8 }),
-            },
-          };
-        }
-
-        return {
-          text: "12 + 8 = 20",
-        };
-      });
-
-      const result = await runMathAgent("请帮我算一下 12 加 8", provider);
-      assert.equal(result, "12 + 8 = 20");
-
-      const files = await readdir(logDir);
-      assert.equal(files.length, 1);
-      assert.match(files[0], /^agx-run-.*\.jsonl$/);
-
-      const logFilePath = path.join(logDir, files[0]);
-      const logLines = (await readFile(logFilePath, "utf8"))
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line));
-
-      assert.equal(logLines[0].type, "run_started");
-      assert.equal(logLines.at(-1)?.type, "run_completed");
-      const sessionEvents = logLines.filter((line) => line.type === "session_event");
-      assert.equal(sessionEvents.length, 1);
-      assert.equal(sessionEvents[0].event, "graph_execution");
-      const graphEvents = logLines.filter((line) => line.type === "graph_event");
-      assert.equal(graphEvents.length, 4);
-      assert.deepEqual(
-        graphEvents.map((line) => line.node),
-        ["normalizeInput", "decideIntent", "executeOperation", "renderAnswer"],
-      );
-      assert.ok(graphEvents.every((line) => line.event === "node_execution"));
-      assert.ok(graphEvents.every((line) => "input" in line && "output" in line));
-      assert.ok(graphEvents.every((line) => line.parentEventId === sessionEvents[0].eventId));
-      const modelCalls = logLines.filter((line) => line.type === "model_call");
-      assert.ok(modelCalls.length >= 2);
-      assert.ok(modelCalls.every((line) => "parentEventId" in line));
-    },
-  );
-});
-
-test("chat session writes all turns into one shared jsonl file", async () => {
-  const logDir = await mkdtemp(path.join(os.tmpdir(), "agent002-session-logs-"));
-
-  await withEnv(
-    {
-      AGX_LOG_DIR: logDir,
-    },
-    async () => {
-      const session = new MathChatSession(
-        new StubProvider(({ messages, tools }) => {
-          const userMessage = messages.at(-1)?.content ?? "";
-          const systemMessage = messages[0]?.content ?? "";
-          const currentInput = extractCurrentInputFromPrompt(userMessage);
-          const isTurnModeCall = systemMessage.includes("对话路由助手");
-
-          if (tools && currentInput === "12 加 8") {
+  try {
+    await withEnv(
+      {
+        AGX_LOG_DIR: logDir,
+        FORNAX_PROCESSOR: "noop",
+      },
+      async () => {
+        const provider = new StubProvider(({ tools }) => {
+          if (tools) {
             return {
               text: "",
               toolCall: {
@@ -535,87 +473,244 @@ test("chat session writes all turns into one shared jsonl file", async () => {
             };
           }
 
-          if (tools && currentInput === "结果再乘 2") {
-            return {
-              text: "",
-              toolCall: {
-                name: "multiply",
-                arguments: JSON.stringify({ left: 20, right: 2 }),
-              },
-            };
-          }
+          return {
+            text: "12 + 8 = 20",
+          };
+        });
 
-          if (!tools && isTurnModeCall) {
-            return {
-              text: currentInput === "结果再乘 2" ? "SUPPLEMENT" : "NEW_QUESTION",
-            };
-          }
+        const result = await runMathAgent("请帮我算一下 12 加 8", provider);
+        assert.equal(result, "12 + 8 = 20");
 
-          const resultMatch = userMessage.match(/计算结果：(.+)$/m);
-          const operationMatch = userMessage.match(/计算操作：(.+)$/m);
-          const paramsMatch = userMessage.match(/计算参数：(.+), (.+)$/m);
+        const files = await readdir(logDir);
+        assert.equal(files.length, 1);
+        assert.match(files[0], /^agx-run-.*\.jsonl$/);
 
-          if (resultMatch && operationMatch && paramsMatch) {
-            const operatorMap = {
-              add: "+",
-              subtract: "-",
-              multiply: "*",
-              divide: "/",
-            } as const;
+        const logFilePath = path.join(logDir, files[0]);
+        const logLines = await readJsonlFile(logFilePath);
+        assertJsonlSpanEventShape(logLines);
 
-            return {
-              text: `${paramsMatch[1]} ${operatorMap[operationMatch[1] as keyof typeof operatorMap]} ${paramsMatch[2]} = ${resultMatch[1]}`,
-            };
-          }
+        assert.equal(logLines[0].type, "run_started");
+        assert.equal(logLines.at(-1)?.type, "run_completed");
+        assert.equal(logLines[0].stage, "start");
+        assert.equal(logLines.at(-1)?.stage, "end");
+        assert.equal(logLines[0].spanType, "agent");
+        assert.equal(logLines.at(-1)?.spanType, "agent");
+        assert.equal(logLines[0].name, "agent_run");
+        assert.equal(logLines.at(-1)?.name, "agent_run");
+        assert.equal(logLines[0].parentSpanId, undefined);
+        assert.equal(logLines.at(-1)?.spanId, logLines[0].spanId);
 
-          throw new Error(`unexpected input: ${userMessage}`);
-        }),
-      );
+        const sessionEvents = logLines.filter((line) => line.type === "session_event");
+        assert.equal(sessionEvents.length, 1);
+        assert.equal(sessionEvents[0].event, "graph_execution");
+        assert.equal(sessionEvents[0].recordType, "span_event");
+        assert.equal(sessionEvents[0].stage, "instant");
+        assert.equal(sessionEvents[0].spanType, "custom");
+        assert.equal(sessionEvents[0].name, "session:graph_execution");
+        assert.equal(sessionEvents[0].parentSpanId, logLines[0].spanId);
 
-      assert.equal(await session.respond("12 加 8"), "12 + 8 = 20");
-      assert.equal(await session.respond("结果再乘 2"), "20 * 2 = 40");
-      await session.close();
+        const graphEvents = logLines.filter((line) => line.type === "graph_event");
+        assert.equal(graphEvents.length, 4);
+        assert.deepEqual(
+          graphEvents.map((line) => line.node),
+          ["normalizeInput", "decideIntent", "executeOperation", "renderAnswer"],
+        );
+        assert.ok(graphEvents.every((line) => line.event === "node_execution"));
+        assert.ok(graphEvents.every((line) => "input" in line && "output" in line));
+        assert.ok(graphEvents.every((line) => line.parentEventId === sessionEvents[0].eventId));
+        assert.ok(graphEvents.every((line) => line.parentSpanId === sessionEvents[0].spanId));
+        assert.ok(graphEvents.every((line) => line.stage === "instant"));
+        assert.ok(graphEvents.every((line) => line.recordType === "span_event"));
 
-      const files = await readdir(logDir);
-      assert.equal(files.length, 1);
-      assert.match(files[0], /^agx-chat-.*\.jsonl$/);
-
-      const logFilePath = path.join(logDir, files[0]);
-      const logLines = (await readFile(logFilePath, "utf8"))
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line));
-
-      assert.equal(
-        logLines.filter((line) => line.type === "run_started").length,
-        3,
-      );
-      assert.equal(
-        logLines.filter((line) => line.type === "run_completed").length,
-        3,
-      );
-      const modelCalls = logLines.filter((line) => line.type === "model_call");
-      assert.ok(modelCalls.length >= 4);
-      assert.ok(modelCalls.every((line) => "parentEventId" in line));
-      const sessionEvents = logLines.filter((line) => line.type === "session_event");
-      assert.equal(sessionEvents.length, 8);
-      assert.deepEqual(
-        sessionEvents.map((line) => line.event),
-        [
-          "turn_mode_resolved",
-          "conversation_input_analyzed",
-          "graph_execution",
-          "conversation_state_updated",
-          "turn_mode_resolved",
-          "conversation_input_analyzed",
-          "graph_execution",
-          "conversation_state_updated",
-        ],
-      );
-      assert.ok(logLines.every((line) => line.runId === logLines[0].runId));
-    },
-  );
+        const modelCalls = logLines.filter((line) => line.type === "model_call");
+        assert.ok(modelCalls.length >= 2);
+        assert.ok(modelCalls.every((line) => "parentEventId" in line));
+        assert.ok(modelCalls.every((line) => line.recordType === "span_event"));
+        assert.ok(modelCalls.every((line) => line.stage === "instant"));
+        assert.ok(modelCalls.every((line) => typeof line.parentSpanId === "string"));
+      },
+    );
+  } finally {
+    await rm(logDir, { recursive: true, force: true });
+  }
 });
+
+test("chat session writes all turns into one shared jsonl file", async () => {
+  const logDir = await mkdtemp(path.join(os.tmpdir(), "agent002-session-logs-"));
+
+  try {
+    await withEnv(
+      {
+        AGX_LOG_DIR: logDir,
+        FORNAX_PROCESSOR: "noop",
+      },
+      async () => {
+        const session = new MathChatSession(
+          new StubProvider(({ messages, tools }) => {
+            const userMessage = messages.at(-1)?.content ?? "";
+            const systemMessage = messages[0]?.content ?? "";
+            const currentInput = extractCurrentInputFromPrompt(userMessage);
+            const isTurnModeCall = systemMessage.includes("对话路由助手");
+
+            if (tools && currentInput === "12 加 8") {
+              return {
+                text: "",
+                toolCall: {
+                  name: "add",
+                  arguments: JSON.stringify({ left: 12, right: 8 }),
+                },
+              };
+            }
+
+            if (tools && currentInput === "结果再乘 2") {
+              return {
+                text: "",
+                toolCall: {
+                  name: "multiply",
+                  arguments: JSON.stringify({ left: 20, right: 2 }),
+                },
+              };
+            }
+
+            if (!tools && isTurnModeCall) {
+              return {
+                text: currentInput === "结果再乘 2" ? "SUPPLEMENT" : "NEW_QUESTION",
+              };
+            }
+
+            const resultMatch = userMessage.match(/计算结果：(.+)$/m);
+            const operationMatch = userMessage.match(/计算操作：(.+)$/m);
+            const paramsMatch = userMessage.match(/计算参数：(.+), (.+)$/m);
+
+            if (resultMatch && operationMatch && paramsMatch) {
+              const operatorMap = {
+                add: "+",
+                subtract: "-",
+                multiply: "*",
+                divide: "/",
+              } as const;
+
+              return {
+                text: `${paramsMatch[1]} ${operatorMap[operationMatch[1] as keyof typeof operatorMap]} ${paramsMatch[2]} = ${resultMatch[1]}`,
+              };
+            }
+
+            throw new Error(`unexpected input: ${userMessage}`);
+          }),
+        );
+
+        try {
+          assert.equal(await session.respond("12 加 8"), "12 + 8 = 20");
+          assert.equal(await session.respond("结果再乘 2"), "20 * 2 = 40");
+        } finally {
+          await session.close();
+        }
+
+        const files = await readdir(logDir);
+        assert.equal(files.length, 1);
+        assert.match(files[0], /^agx-chat-.*\.jsonl$/);
+
+        const logFilePath = path.join(logDir, files[0]);
+        const logLines = await readJsonlFile(logFilePath);
+        assertJsonlSpanEventShape(logLines);
+
+        assert.equal(
+          logLines.filter((line) => line.type === "run_started").length,
+          3,
+        );
+        assert.equal(
+          logLines.filter((line) => line.type === "run_completed").length,
+          3,
+        );
+        const modelCalls = logLines.filter((line) => line.type === "model_call");
+        assert.ok(modelCalls.length >= 4);
+        assert.ok(modelCalls.every((line) => "parentEventId" in line));
+        const sessionEvents = logLines.filter((line) => line.type === "session_event");
+        assert.equal(sessionEvents.length, 8);
+        assert.deepEqual(
+          sessionEvents.map((line) => line.event),
+          [
+            "turn_mode_resolved",
+            "conversation_input_analyzed",
+            "graph_execution",
+            "conversation_state_updated",
+            "turn_mode_resolved",
+            "conversation_input_analyzed",
+            "graph_execution",
+            "conversation_state_updated",
+          ],
+        );
+        assert.ok(logLines.every((line) => line.runId === logLines[0].runId));
+
+        const sessionLifecycleStart = logLines.find(
+          (line) => line.type === "run_started" && line.phase === "session_lifecycle",
+        );
+        const sessionLifecycleEnd = logLines.find(
+          (line) => line.type === "run_completed" && line.phase === "session_lifecycle",
+        );
+        assert.ok(sessionLifecycleStart);
+        assert.ok(sessionLifecycleEnd);
+        assert.equal(sessionLifecycleStart.stage, "start");
+        assert.equal(sessionLifecycleEnd.stage, "end");
+        assert.equal(sessionLifecycleStart.parentSpanId, undefined);
+        assert.equal(sessionLifecycleEnd.spanId, sessionLifecycleStart.spanId);
+
+        const turnStarts = logLines.filter(
+          (line) => line.type === "run_started" && line.phase === "session_turn",
+        );
+        const turnEnds = logLines.filter(
+          (line) => line.type === "run_completed" && line.phase === "session_turn",
+        );
+        assert.equal(turnStarts.length, 2);
+        assert.equal(turnEnds.length, 2);
+        assert.ok(
+          turnStarts.every((line) => line.parentSpanId === sessionLifecycleStart.spanId),
+        );
+        assert.deepEqual(
+          turnEnds.map((line) => line.spanId),
+          turnStarts.map((line) => line.spanId),
+        );
+
+        const graphExecutionEvents = sessionEvents.filter((line) => line.event === "graph_execution");
+        assert.equal(graphExecutionEvents.length, 2);
+        assert.deepEqual(
+          graphExecutionEvents.map((line) => line.parentSpanId),
+          turnStarts.map((line) => line.spanId),
+        );
+
+        assert.ok(
+          sessionEvents.every((line) => line.recordType === "span_event" && line.stage === "instant"),
+        );
+      },
+    );
+  } finally {
+    await rm(logDir, { recursive: true, force: true });
+  }
+});
+
+async function readJsonlFile(filePath: string): Promise<Record<string, unknown>[]> {
+  return (await readFile(filePath, "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+function assertJsonlSpanEventShape(logLines: Record<string, unknown>[]) {
+  assert.ok(logLines.length > 0);
+
+  for (const [index, line] of logLines.entries()) {
+    assert.equal(line.sequence, index);
+    assert.equal(line.recordType, "span_event");
+    assert.equal(typeof line.timestamp, "string");
+    assert.equal(typeof line.runId, "string");
+    assert.equal(typeof line.spanId, "string");
+    assert.equal(typeof line.name, "string");
+    assert.equal(typeof line.spanType, "string");
+    assert.match(line.stage as string, /^(start|instant|end)$/);
+    assert.match(line.status as string, /^(open|completed|failed)$/);
+    assert.equal(typeof line.type, "string");
+  }
+}
 
 function parseHistoryFromPrompt(prompt: string): ConversationMessage[] {
   if (!prompt.includes("对话历史：")) {
