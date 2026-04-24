@@ -16,9 +16,9 @@ export class MathDecisionService {
     input: string,
     context: MathConversationContext = {},
     parentEventId?: string,
-  ): Promise<"new_question" | "supplement"> {
+  ): Promise<"new_request" | "supplement"> {
     if (!context.pendingQuestion) {
-      return "new_question";
+      return "new_request";
     }
 
     const response = await generateWithLogging({
@@ -49,8 +49,8 @@ export class MathDecisionService {
       return "supplement";
     }
 
-    if (normalized.includes("NEW_QUESTION")) {
-      return "new_question";
+    if (normalized.includes("NEW_QUESTION") || normalized.includes("NEW_REQUEST")) {
+      return "new_request";
     }
 
     return "supplement";

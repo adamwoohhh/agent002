@@ -10,7 +10,7 @@ export async function classifyTurnMode(
   provider: MathModelProvider,
   input: string,
   context: MathConversationContext = {},
-): Promise<"new_question" | "supplement"> {
+): Promise<"new_request" | "supplement"> {
   return new MathDecisionService(provider).classifyTurnMode(input, context);
 }
 

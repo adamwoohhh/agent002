@@ -1,7 +1,8 @@
-import type { ConversationMessage, MathModelProvider } from "../../../infrastructure/llm/types.js";
+import type { MathModelProvider } from "../../../infrastructure/llm/types.js";
 import type { TelemetryWriter } from "../../../infrastructure/observability/telemetry-writer.js";
 import { generateWithLogging } from "../../../infrastructure/observability/model-call-logger.js";
-import type { ConversationState } from "../types.js";
+import type { AgentTurnMode } from "../../agent/types.js";
+import type { MathSkillState } from "../types.js";
 
 export type ConversationInputAnalysis = {
   pendingQuestion: string;
@@ -9,39 +10,52 @@ export type ConversationInputAnalysis = {
   source: "llm" | "fallback";
 };
 
-export function createEmptyConversationState(): ConversationState {
+export type MathSkillTurnResult = {
+  status: "answered" | "clarify" | "reject";
+  answer: string;
+  execution?: {
+    operation: "add" | "subtract" | "multiply" | "divide";
+    operands: [number, number];
+    result: number;
+  };
+};
+
+export function createEmptyConversationState(): MathSkillState {
   return {
-    history: [],
     pendingQuestion: null,
     factMemory: [],
     lastClarificationQuestion: null,
+    lastResolvedOperation: null,
+    lastResolvedOperands: null,
+    lastResult: null,
   };
 }
 
-export class ConversationStateManager {
+export class MathSkillStateManager {
   constructor(
     private readonly provider?: MathModelProvider,
     private readonly logger?: TelemetryWriter,
   ) {}
 
-  createInitialState(): ConversationState {
+  createInitialState(): MathSkillState {
     return createEmptyConversationState();
   }
 
   async beginTurn(
-    state: ConversationState,
+    state: MathSkillState,
     input: string,
-    turnMode: "new_question" | "supplement",
+    turnMode: AgentTurnMode,
     parentEventId?: string,
-  ): Promise<{ state: ConversationState; analysis: ConversationInputAnalysis }> {
+  ): Promise<{ state: MathSkillState; analysis: ConversationInputAnalysis }> {
     const analysis = await analyzeConversationInput(this.provider, input, turnMode, this.logger, parentEventId);
 
-    if (turnMode === "new_question") {
+    if (turnMode === "new_request") {
       return {
         state: {
           ...state,
           pendingQuestion: analysis.pendingQuestion,
           factMemory: analysis.facts,
+          lastClarificationQuestion: null,
         },
         analysis,
       };
@@ -50,38 +64,41 @@ export class ConversationStateManager {
     return {
       state: {
         ...state,
+        pendingQuestion: state.pendingQuestion ?? analysis.pendingQuestion,
         factMemory: mergeFacts(state.factMemory, analysis.facts),
       },
       analysis,
     };
   }
 
-  completeTurn(state: ConversationState, input: string, answer: string): ConversationState {
-    const history = appendHistory(state.history, input, answer);
-
-    if (answer === state.lastClarificationQuestion) {
+  completeTurn(state: MathSkillState, turnResult: MathSkillTurnResult): MathSkillState {
+    if (turnResult.status === "clarify" || looksLikeClarification(turnResult.answer)) {
       return {
         ...state,
-        history,
+        lastClarificationQuestion: turnResult.answer,
       };
     }
 
-    if (looksLikeClarification(answer)) {
+    if (turnResult.status === "answered" && turnResult.execution) {
       return {
         ...state,
-        history,
-        lastClarificationQuestion: answer,
+        pendingQuestion: null,
+        lastClarificationQuestion: null,
+        lastResolvedOperation: turnResult.execution.operation,
+        lastResolvedOperands: turnResult.execution.operands,
+        lastResult: turnResult.execution.result,
       };
     }
 
     return {
       ...state,
-      history,
-      lastClarificationQuestion: null,
       pendingQuestion: null,
+      lastClarificationQuestion: null,
     };
   }
 }
+
+export { MathSkillStateManager as ConversationStateManager };
 
 export function looksLikeClarification(answer: string): boolean {
   return (
@@ -103,22 +120,22 @@ export function fallbackResolveTurnMode(
   input: string,
   pendingQuestion: string | null,
   lastClarificationQuestion: string | null,
-): "new_question" | "supplement" {
+): AgentTurnMode {
   if (!pendingQuestion) {
-    return "new_question";
+    return "new_request";
   }
 
   if (lastClarificationQuestion) {
     return "supplement";
   }
 
-  return looksLikeNewQuestion(input) ? "new_question" : "supplement";
+  return looksLikeNewQuestion(input) ? "new_request" : "supplement";
 }
 
 export async function analyzeConversationInput(
   provider: MathModelProvider | undefined,
   input: string,
-  turnMode: "new_question" | "supplement",
+  turnMode: AgentTurnMode,
   logger?: TelemetryWriter,
   parentEventId?: string,
 ): Promise<ConversationInputAnalysis> {
@@ -157,7 +174,7 @@ export async function analyzeConversationInput(
         },
         {
           role: "user",
-          content: `本轮输入类型：${turnMode === "new_question" ? "新问题" : "补充信息"}\n本轮用户输入：${input}`,
+          content: `本轮输入类型：${turnMode === "new_request" ? "新问题" : "补充信息"}\n本轮用户输入：${input}`,
         },
       ],
     });
@@ -245,12 +262,4 @@ function extractJsonObject(text: string): string | null {
   }
 
   return text.slice(firstBrace, lastBrace + 1);
-}
-
-function appendHistory(history: ConversationMessage[], input: string, answer: string): ConversationMessage[] {
-  return [
-    ...history,
-    { role: "user", content: input },
-    { role: "assistant", content: answer },
-  ];
 }

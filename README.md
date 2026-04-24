@@ -164,7 +164,7 @@ AGX_ENABLE_LLM_EVALS=1 npm run eval
   - `AppConfig` 在这一层统一收敛环境变量与 CLI 覆盖
 - `src/platform/`
   - 通用 agent runtime 骨架
-  - 提供 `CapabilityRegistry`、`AgentRuntime`、`ExecutionPolicy`、`TaskManager`
+  - 提供 `SkillRegistry`、`SkillRouter`、`AgentRuntime`、`ExecutionPolicy`、`TaskManager`
 
 这次重构的目标不是一步变成完整的通用 coding agent，而是先把“单领域 agent”拆清楚，同时为后续平台化能力预留接口。
 
@@ -226,16 +226,18 @@ START -> normalizeInput -> decideIntent -> executeOperation -> renderAnswer -> E
 
 为了给后续往 Codex / Claude Code 风格演进打底，项目现在增加了一个轻量 runtime 骨架：
 
-- `CapabilityRegistry`
-  - 注册能力模块
-- `MathCapability`
-  - 数学能力作为第一个 capability 接入
+- `SkillRegistry`
+  - 注册内置 skill
+- `SkillRouter`
+  - 在会话层决定当前请求应进入哪个 skill
+- `MathSkill`
+  - 数学能力作为第一个内置 skill 接入
 - `AgentRuntime`
-  - 负责创建 task / run、执行 capability、挂接 policy 和 observability
+  - 负责创建 task / run、执行 skill、挂接 policy 和 observability
 - `ExecutionPolicy`
   - 当前默认 `AllowAll`，但接口已经固定，后续可以接审批和 sandbox 约束
 
-这部分还不是完整的平台能力，但已经把“数学流程”从“唯一主流程”提升成了“可被 runtime 执行的 capability”。
+这部分还不是完整的平台能力，但已经把“数学流程”从“唯一主流程”提升成了“可被 runtime 路由和执行的内置 skill”。
 
 ## 支持范围
 

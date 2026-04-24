@@ -1,7 +1,7 @@
 import type { MathConversationContext } from "../types.js";
 
 export const mathToolSystemPrompt = [
-  "你是一个数学计算助手。",
+  "你是 agent 内置的 math skill。",
   "你只支持两个数字的一次加减乘除。",
   "用户的输入可能带有生活情境，你需要先从情境中提取参与计算的两个数字和对应操作，再决定是否调用工具。",
   "例如“冰箱里有 3 个苹果，早上我吃了 1 个，还剩下几个苹果”应该调用 subtract(left=3, right=1)。",
@@ -21,10 +21,22 @@ export function buildConversationPrompt(input: string, context: MathConversation
   const history = context.history ?? [];
   const pendingQuestion = context.pendingQuestion?.trim();
   const factMemory = (context.factMemory ?? []).map((fact) => fact.trim()).filter(Boolean);
-  const turnMode = context.turnMode ?? "new_question";
+  const turnMode = context.turnMode ?? "new_request";
   const lastClarificationQuestion = context.lastClarificationQuestion?.trim();
+  const lastResult = context.lastResult;
 
-  if (!pendingQuestion && factMemory.length === 0 && !lastClarificationQuestion && history.length === 0) {
+  if (!pendingQuestion && factMemory.length === 0 && !lastClarificationQuestion && history.length === 0 && lastResult === null) {
+    return input;
+  }
+
+  if (
+    history.length === 0 &&
+    !lastClarificationQuestion &&
+    lastResult === null &&
+    pendingQuestion === input.trim() &&
+    factMemory.length === 1 &&
+    factMemory[0] === input.trim()
+  ) {
     return input;
   }
 
@@ -50,7 +62,11 @@ export function buildConversationPrompt(input: string, context: MathConversation
     sections.push(`上一轮澄清问题：${lastClarificationQuestion}`);
   }
 
-  sections.push(`本轮输入类型：${turnMode === "supplement" ? "补充信息" : "新问题"}`);
+  if (lastResult !== null) {
+    sections.push(`上一轮结果：${lastResult}`);
+  }
+
+  sections.push(`本轮输入类型：${turnMode === "supplement" ? "补充信息" : "新请求"}`);
 
   if (transcript) {
     sections.push(["对话历史：", transcript].join("\n"));
@@ -66,6 +82,7 @@ export function buildTurnModePrompt(input: string, context: MathConversationCont
   const pendingQuestion = context.pendingQuestion?.trim();
   const factMemory = (context.factMemory ?? []).map((fact) => fact.trim()).filter(Boolean);
   const lastClarificationQuestion = context.lastClarificationQuestion?.trim();
+  const lastResult = context.lastResult;
 
   const sections = [];
 
@@ -79,6 +96,10 @@ export function buildTurnModePrompt(input: string, context: MathConversationCont
 
   if (lastClarificationQuestion) {
     sections.push(`上一轮澄清问题：${lastClarificationQuestion}`);
+  }
+
+  if (lastResult !== null && lastResult !== undefined) {
+    sections.push(`上一轮结果：${lastResult}`);
   }
 
   if (history.length > 0) {

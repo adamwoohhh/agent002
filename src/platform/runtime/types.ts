@@ -1,6 +1,6 @@
 export type AgentTask = {
   id: string;
-  capability: string;
+  skillId: string;
   input: string;
 };
 
@@ -23,8 +23,8 @@ export type AgentRun = {
 };
 
 export type ExecutionAction = {
-  kind: "capability";
-  capability: string;
+  kind: "skill";
+  skillId: string;
   input: string;
 };
 

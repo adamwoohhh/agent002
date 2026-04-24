@@ -34,8 +34,11 @@ export const MathAgentStateSchema = new StateSchema({
   ),
   pendingQuestion: z.string().nullable(),
   factMemory: z.array(z.string()),
-  turnMode: z.enum(["new_question", "supplement"]).nullable(),
+  turnMode: z.enum(["new_request", "supplement"]).nullable(),
   lastClarificationQuestion: z.string().nullable(),
+  lastResolvedOperation: z.enum(["add", "subtract", "multiply", "divide"]).nullable(),
+  lastResolvedOperands: z.tuple([z.number(), z.number()]).nullable(),
+  lastResult: z.number().nullable(),
   graphParentEventId: z.string().nullable(),
 });
 
@@ -217,6 +220,9 @@ export async function executeMathGraph(params: {
     factMemory: params.context?.factMemory ?? [],
     turnMode: params.context?.turnMode ?? null,
     lastClarificationQuestion: params.context?.lastClarificationQuestion ?? null,
+    lastResolvedOperation: params.context?.lastResolvedOperation ?? null,
+    lastResolvedOperands: params.context?.lastResolvedOperands ?? null,
+    lastResult: params.context?.lastResult ?? null,
     graphParentEventId: params.parentEventId ?? null,
   };
 
@@ -246,8 +252,11 @@ export type MathGraphFinalState = {
   history: Array<{ role: "user" | "assistant"; content: string }>;
   pendingQuestion: string | null;
   factMemory: string[];
-  turnMode: "new_question" | "supplement" | null;
+  turnMode: "new_request" | "supplement" | null;
   lastClarificationQuestion: string | null;
+  lastResolvedOperation: "add" | "subtract" | "multiply" | "divide" | null;
+  lastResolvedOperands: [number, number] | null;
+  lastResult: number | null;
   graphParentEventId: string | null;
 };
 
@@ -258,6 +267,9 @@ function stateToContext(state: MathGraphFinalState): MathConversationContext {
     factMemory: state.factMemory,
     turnMode: state.turnMode ?? undefined,
     lastClarificationQuestion: state.lastClarificationQuestion,
+    lastResolvedOperation: state.lastResolvedOperation,
+    lastResolvedOperands: state.lastResolvedOperands,
+    lastResult: state.lastResult,
   };
 }
 

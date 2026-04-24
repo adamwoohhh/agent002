@@ -1,21 +1,19 @@
 import type { ConversationMessage } from "../../infrastructure/llm/types.js";
 import type { MathExecutionResult, Operation } from "../../domain/math/types.js";
+import type { AgentTurnMode } from "../agent/types.js";
 
-export type TurnMode = "new_question" | "supplement";
-
-export type MathConversationContext = {
-  history?: ConversationMessage[];
-  pendingQuestion?: string | null;
-  factMemory?: string[];
-  turnMode?: TurnMode;
-  lastClarificationQuestion?: string | null;
-};
-
-export type ConversationState = {
-  history: ConversationMessage[];
+export type MathSkillState = {
   pendingQuestion: string | null;
   factMemory: string[];
   lastClarificationQuestion: string | null;
+  lastResolvedOperation: Operation | null;
+  lastResolvedOperands: [number, number] | null;
+  lastResult: number | null;
+};
+
+export type MathConversationContext = Partial<MathSkillState> & {
+  history?: ConversationMessage[];
+  turnMode?: AgentTurnMode;
 };
 
 export type MathAgentState = {

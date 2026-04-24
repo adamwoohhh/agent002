@@ -4,7 +4,7 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import type { MathToolDecision } from "../../src/math.js";
+import type { MathToolDecision } from "../../src/domain/math/types.js";
 import type {
   ConversationMessage,
   MathModelProvider,
@@ -626,16 +626,15 @@ test("chat session writes all turns into one shared jsonl file", async () => {
         assert.ok(modelCalls.length >= 4);
         assert.ok(modelCalls.every((line) => "parentEventId" in line));
         const sessionEvents = logLines.filter((line) => line.type === "session_event");
-        assert.equal(sessionEvents.length, 8);
+        assert.equal(sessionEvents.length, 7);
         assert.deepEqual(
           sessionEvents.map((line) => line.event),
           [
             "turn_mode_resolved",
-            "conversation_input_analyzed",
+            "skill_routed",
             "graph_execution",
             "conversation_state_updated",
             "turn_mode_resolved",
-            "conversation_input_analyzed",
             "graph_execution",
             "conversation_state_updated",
           ],

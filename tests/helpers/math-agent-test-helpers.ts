@@ -1,11 +1,13 @@
-import { MathCapability } from "../../src/application/math-agent/math-capability.js";
-import { MathChatService } from "../../src/application/math-agent/math-chat-service.js";
+import { AgentChatService } from "../../src/application/agent/agent-chat-service.js";
+import { MathSkill } from "../../src/application/math-agent/math-skill.js";
 import type { MathConversationContext } from "../../src/application/math-agent/types.js";
 import { resolveAppConfig, type AppConfig } from "../../src/infrastructure/config/app-config.js";
 import { createEventId } from "../../src/infrastructure/observability/event-tree.js";
 import { createTelemetryWriter } from "../../src/infrastructure/observability/create-telemetry-writer.js";
 import type { TelemetryWriter } from "../../src/infrastructure/observability/telemetry-writer.js";
 import type { ConversationMessage, MathModelProvider } from "../../src/infrastructure/llm/types.js";
+import { SkillRegistry } from "../../src/platform/runtime/skill.js";
+import { SkillRouter } from "../../src/platform/runtime/skill-router.js";
 
 export async function runMathAgent(
   input: string,
@@ -18,7 +20,7 @@ export async function runMathAgent(
   const activeLogger =
     logger ??
     (await createTelemetryWriter("agx-run", config));
-  const capability = new MathCapability(config, provider, activeLogger);
+  const skill = new MathSkill(config, provider, activeLogger);
   const initialContext = {
     ...conversationContext,
     history,
@@ -49,14 +51,20 @@ export async function runMathAgent(
       context: initialContext,
     });
 
-    const result = await capability.handle(input, {
+    const result = await skill.handle(input, {
       history: initialContext.history,
       metadata: {
-        pendingQuestion: initialContext.pendingQuestion,
-        factMemory: initialContext.factMemory,
         turnMode: initialContext.turnMode,
-        lastClarificationQuestion: initialContext.lastClarificationQuestion,
+        skillState: {
+          pendingQuestion: initialContext.pendingQuestion,
+          factMemory: initialContext.factMemory,
+          lastClarificationQuestion: initialContext.lastClarificationQuestion,
+          lastResolvedOperation: initialContext.lastResolvedOperation,
+          lastResolvedOperands: initialContext.lastResolvedOperands,
+          lastResult: initialContext.lastResult,
+        },
         graphParentEventId: graphSessionEventId,
+        telemetryLogger: activeLogger,
       },
     });
     const finalAnswer = result.output;
@@ -87,10 +95,12 @@ export async function runMathAgent(
 }
 
 export class MathChatSession {
-  private readonly service: MathChatService;
+  private readonly service: AgentChatService;
 
   constructor(provider: MathModelProvider, config: AppConfig = resolveAppConfig()) {
-    this.service = new MathChatService(config, provider);
+    const registry = new SkillRegistry();
+    registry.register(new MathSkill(config, provider));
+    this.service = new AgentChatService(config, provider, registry, new SkillRouter());
   }
 
   async respond(input: string): Promise<string> {

@@ -3,10 +3,10 @@ import { randomUUID } from "node:crypto";
 import type { AgentRun, AgentTask } from "./types.js";
 
 export class TaskManager {
-  createTask(capability: string, input: string): AgentTask {
+  createTask(skillId: string, input: string): AgentTask {
     return {
       id: randomUUID(),
-      capability,
+      skillId,
       input,
     };
   }
@@ -18,7 +18,7 @@ export class TaskManager {
       steps: [
         {
           id: randomUUID(),
-          name: `${task.capability}:handle`,
+          name: `${task.skillId}:handle`,
           status: "pending",
         },
       ],
