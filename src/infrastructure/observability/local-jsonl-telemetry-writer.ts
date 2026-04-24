@@ -15,6 +15,9 @@ import type {
 export class LocalJsonlTelemetryWriter implements TelemetryWriter {
   private sequence = 0;
   private readonly spanDescriptors = new Map<string, SpanDescriptor>();
+  private readonly writtenEventIds = new Set<string>();
+  private readonly pendingEventsByParentId = new Map<string, TelemetryEvent[]>();
+  private writeChain: Promise<void> = Promise.resolve();
 
   constructor(
     readonly runId: string,
@@ -43,6 +46,49 @@ export class LocalJsonlTelemetryWriter implements TelemetryWriter {
   async runtimeTaskCompleted(event: RuntimeTelemetryEvent): Promise<void> { await this.appendEvent(event); }
 
   private async appendEvent(event: TelemetryEvent): Promise<void> {
+    if (this.shouldWaitForParent(event)) {
+      this.enqueuePendingEvent(event.parentEventId as string, event);
+      return;
+    }
+
+    await this.enqueueWrite(async () => {
+      await this.writeEventAndChildren(event);
+    });
+  }
+
+  private shouldWaitForParent(event: TelemetryEvent): boolean {
+    return typeof event.parentEventId === "string" && !this.writtenEventIds.has(event.parentEventId);
+  }
+
+  private enqueuePendingEvent(parentEventId: string, event: TelemetryEvent): void {
+    const pendingEvents = this.pendingEventsByParentId.get(parentEventId) ?? [];
+    pendingEvents.push(event);
+    this.pendingEventsByParentId.set(parentEventId, pendingEvents);
+  }
+
+  private async enqueueWrite(work: () => Promise<void>): Promise<void> {
+    const next = this.writeChain.then(work);
+    this.writeChain = next.catch(() => {});
+    await next;
+  }
+
+  private async writeEventAndChildren(event: TelemetryEvent): Promise<void> {
+    await this.writeEvent(event);
+
+    if (typeof event.eventId !== "string") {
+      return;
+    }
+
+    this.writtenEventIds.add(event.eventId);
+    const pendingEvents = this.pendingEventsByParentId.get(event.eventId) ?? [];
+    this.pendingEventsByParentId.delete(event.eventId);
+
+    for (const pendingEvent of pendingEvents) {
+      await this.writeEventAndChildren(pendingEvent);
+    }
+  }
+
+  private async writeEvent(event: TelemetryEvent): Promise<void> {
     const sanitizedRecord = sanitizeForJsonl(this.toSpanRecord(event));
     const line = JSON.stringify({
       sequence: this.sequence,
@@ -54,11 +100,11 @@ export class LocalJsonlTelemetryWriter implements TelemetryWriter {
   }
 
   async flush(): Promise<void> {
-    return Promise.resolve();
+    await this.writeChain;
   }
 
   async shutdown(): Promise<void> {
-    return Promise.resolve();
+    await this.writeChain;
   }
 
   private toSpanRecord(event: TelemetryEvent): LocalSpanRecord {

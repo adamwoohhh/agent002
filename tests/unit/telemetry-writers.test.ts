@@ -45,6 +45,58 @@ test("LocalJsonlTelemetryWriter preserves jsonl event contract", async () => {
   }
 });
 
+test("LocalJsonlTelemetryWriter writes parent events before queued child events", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "local-jsonl-parent-first-"));
+
+  try {
+    const writer = await LocalJsonlTelemetryWriter.create({
+      runId: "run-1",
+      prefix: "agx-run",
+      logDirectory: tempRoot,
+    });
+
+    await writer.modelCall({
+      type: "model_call",
+      timestamp: "2026-04-23T00:00:01.000Z",
+      runId: writer.runId,
+      eventId: "child-model",
+      parentEventId: "parent-graph",
+      purpose: "choose_math_tool",
+      input: { messages: [{ role: "user", contentPreview: "12 加 8" }] },
+      provider: "stub",
+      model: "stub-model",
+    });
+
+    await writer.graphEvent({
+      type: "graph_event",
+      timestamp: "2026-04-23T00:00:02.000Z",
+      runId: writer.runId,
+      eventId: "parent-graph",
+      event: "node_execution",
+      node: "decideIntent",
+      input: { normalizedInput: "12 加 8" },
+      output: { operation: "add" },
+    });
+
+    await writer.flush();
+
+    const lines = (await readFile(writer.filePath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+    assert.deepEqual(
+      lines.map((line) => [line.sequence, line.type, line.eventId]),
+      [
+        [0, "graph_event", "parent-graph"],
+        [1, "model_call", "child-model"],
+      ],
+    );
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("CompositeTelemetryWriter writes to every sink and swallows sink failures", async () => {
   const seenEvents: TelemetryEvent[] = [];
   const goodSink: TelemetryWriter = {
