@@ -271,9 +271,9 @@ function renderAppHtml(): string {
         min-height: 0;
       }
 
-      .file-item, .event-row {
+      .file-item, .event-row, .conversation-turn {
         border: 1px solid transparent;
-        border-radius: 14px;
+        border-radius: 8px;
         padding: 12px;
         cursor: pointer;
       }
@@ -287,12 +287,118 @@ function renderAppHtml(): string {
         display: grid;
         gap: 8px;
         margin-top: 8px;
+        position: relative;
       }
 
-      .file-item:hover, .event-row:hover { background: rgba(255,255,255,0.55); }
-      .file-item.selected, .event-row.selected {
+      .event-children::before {
+        content: "";
+        position: absolute;
+        top: -8px;
+        bottom: 4px;
+        left: 18px;
+        width: 2px;
+        background: rgba(117, 98, 82, 0.18);
+      }
+
+      .file-item:hover, .event-row:hover, .conversation-turn:hover { background: rgba(255,255,255,0.55); }
+      .file-item.selected, .event-row.selected, .conversation-turn.selected {
         background: var(--selected);
         border-color: #d3ae7a;
+      }
+
+      .event-row {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 10px;
+        align-items: start;
+        background: rgba(255, 253, 248, 0.78);
+        border-color: rgba(223, 210, 191, 0.72);
+        border-left-width: 5px;
+      }
+
+      .event-row.depth-0 {
+        background: #fffaf0;
+        border-color: #d8b071;
+        font-weight: 600;
+      }
+
+      .event-row.depth-1 {
+        background: #fffdf8;
+      }
+
+      .event-row.depth-2,
+      .event-row.depth-3,
+      .event-row.depth-4,
+      .event-row.depth-5 {
+        background: rgba(255, 255, 255, 0.62);
+        font-size: 13px;
+      }
+
+      .event-row.type-run_started,
+      .event-row.type-run_completed {
+        border-left-color: #7b996c;
+      }
+
+      .event-row.type-session_event {
+        border-left-color: #b68145;
+      }
+
+      .event-row.type-graph_event {
+        border-left-color: #5786a6;
+      }
+
+      .event-row.type-model_call {
+        border-left-color: #8d6ab8;
+      }
+
+      .event-row.type-runtime_task_completed {
+        border-left-color: #bd6b62;
+      }
+
+      .event-row.status-open {
+        border-style: dashed;
+      }
+
+      .event-row.status-completed {
+        box-shadow: inset 0 0 0 1px rgba(123, 153, 108, 0.08);
+      }
+
+      .event-main {
+        min-width: 0;
+      }
+
+      .event-title {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        min-width: 0;
+      }
+
+      .event-title strong {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .collapse-toggle {
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        border-radius: 50%;
+        border: 1px solid var(--line);
+        background: var(--panel-strong);
+        color: var(--muted);
+        flex: 0 0 auto;
+        line-height: 1;
+      }
+
+      .collapse-toggle:hover {
+        background: #f3e4d0;
+        color: var(--text);
+      }
+
+      .collapse-toggle.placeholder {
+        visibility: hidden;
       }
 
       .file-meta, .event-meta {
@@ -317,6 +423,56 @@ function renderAppHtml(): string {
       .event-grid {
         display: grid;
         gap: 8px;
+      }
+
+      .mini-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .mini-actions button {
+        width: auto;
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: var(--panel-strong);
+        color: var(--text);
+        border: 1px solid var(--line);
+      }
+
+      .conversation-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .conversation-turn {
+        background: rgba(255, 253, 248, 0.82);
+        border-color: var(--line);
+      }
+
+      .conversation-turn h3 {
+        margin: 0 0 10px;
+        font-size: 14px;
+      }
+
+      .message {
+        display: grid;
+        gap: 4px;
+        margin-top: 8px;
+      }
+
+      .message .role {
+        color: var(--muted);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .message .content {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        line-height: 1.55;
       }
 
       pre {
@@ -402,6 +558,10 @@ function renderAppHtml(): string {
         <select id="modeSelect">
           <option value="">全部 graph mode</option>
         </select>
+        <select id="viewSelect">
+          <option value="events">全部事件</option>
+          <option value="conversation">仅对话输入/输出</option>
+        </select>
       </section>
 
       <div class="layout">
@@ -439,6 +599,8 @@ function renderAppHtml(): string {
         currentFile: null,
         currentDetail: null,
         selectedEventIndex: -1,
+        collapsedKeys: new Set(),
+        view: "events",
         filters: { keyword: "", type: "", mode: "" },
       };
 
@@ -452,6 +614,7 @@ function renderAppHtml(): string {
       const keywordInput = document.getElementById("keywordInput");
       const typeSelect = document.getElementById("typeSelect");
       const modeSelect = document.getElementById("modeSelect");
+      const viewSelect = document.getElementById("viewSelect");
       const refreshButton = document.getElementById("refreshButton");
 
       refreshButton.addEventListener("click", () => loadFiles());
@@ -465,6 +628,11 @@ function renderAppHtml(): string {
       });
       modeSelect.addEventListener("change", () => {
         state.filters.mode = modeSelect.value;
+        renderEvents();
+      });
+      viewSelect.addEventListener("change", () => {
+        state.view = viewSelect.value;
+        state.selectedEventIndex = -1;
         renderEvents();
       });
 
@@ -494,6 +662,7 @@ function renderAppHtml(): string {
       async function loadFile(name) {
         state.currentFile = state.files.find((file) => file.name === name) ?? null;
         state.selectedEventIndex = -1;
+        state.collapsedKeys = new Set();
         detailLabel.textContent = "点击中间一条事件查看完整 JSON";
         detailPanel.innerHTML = '<div class="empty">还没有选中的事件。</div>';
         renderFiles();
@@ -581,8 +750,13 @@ function renderAppHtml(): string {
           return;
         }
 
+        if (state.view === 'conversation') {
+          renderConversationTurns(detail);
+          return;
+        }
+
         const filteredTree = filterEventTree(detail.eventTree ?? buildEventTree(detail.events), matchesEventFilters);
-        const visibleNodes = flattenEventTree(filteredTree);
+        const visibleNodes = flattenVisibleEventTree(filteredTree);
 
         eventCountLabel.textContent = '显示 ' + visibleNodes.length + ' / ' + detail.events.length + ' 条事件';
 
@@ -592,10 +766,34 @@ function renderAppHtml(): string {
           eventList.innerHTML = '<div class="event-tree">' + renderEventTree(filteredTree, 0) + '</div>';
         }
 
+        const actionHtml = visibleNodes.length > 0
+          ? '<div class="mini-actions"><button id="expandAllButton" type="button">全部展开</button><button id="collapseAllButton" type="button">折叠父事件</button></div>'
+          : '';
+        eventList.innerHTML = actionHtml + eventList.innerHTML;
+
         if ((detail.parseErrors ?? []).length > 0) {
           eventList.innerHTML += '<div class="error-list">' + detail.parseErrors.map((error) =>
             '<div class="error-item"><strong>解析错误</strong><div>第 ' + error.lineNumber + ' 行：' + escapeHtml(error.message) + '</div></div>'
           ).join('') + '</div>';
+        }
+
+        const expandAllButton = document.getElementById('expandAllButton');
+        if (expandAllButton) {
+          expandAllButton.addEventListener('click', () => {
+            state.collapsedKeys.clear();
+            renderEvents();
+          });
+        }
+        const collapseAllButton = document.getElementById('collapseAllButton');
+        if (collapseAllButton) {
+          collapseAllButton.addEventListener('click', () => {
+            for (const node of flattenEventTree(filteredTree)) {
+              if ((node.children ?? []).length > 0) {
+                state.collapsedKeys.add(getNodeKey(node));
+              }
+            }
+            renderEvents();
+          });
         }
 
         for (const element of eventList.querySelectorAll('.event-row')) {
@@ -605,8 +803,104 @@ function renderAppHtml(): string {
             renderDetail();
           });
         }
+        for (const element of eventList.querySelectorAll('.collapse-toggle:not(.placeholder)')) {
+          element.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const key = element.dataset.key;
+            if (!key) {
+              return;
+            }
+            if (state.collapsedKeys.has(key)) {
+              state.collapsedKeys.delete(key);
+            } else {
+              state.collapsedKeys.add(key);
+            }
+            renderEvents();
+          });
+        }
 
         renderDetail();
+      }
+
+      function renderConversationTurns(detail) {
+        const turns = extractConversationTurns(detail.events);
+        const filteredTurns = turns.filter((turn) => {
+          if (!state.filters.keyword) {
+            return true;
+          }
+          return (turn.input + '\\n' + turn.output).toLowerCase().includes(state.filters.keyword);
+        });
+
+        eventCountLabel.textContent = '显示 ' + filteredTurns.length + ' / ' + turns.length + ' 轮对话';
+        if (filteredTurns.length === 0) {
+          eventList.innerHTML = '<div class="empty">没有匹配当前过滤条件的对话轮次。</div>';
+          renderDetail();
+          return;
+        }
+
+        eventList.innerHTML = '<div class="conversation-list">' + filteredTurns.map((turn) => {
+          const selected = turn.index === state.selectedEventIndex ? 'selected' : '';
+          return '<div class="conversation-turn ' + selected + '" data-index="' + turn.index + '">' +
+            '<h3>#' + escapeHtml(String(turn.sequence ?? '-')) + ' ' + escapeHtml(formatMaybeDate(turn.timestamp)) + '</h3>' +
+            '<div class="message"><span class="role">用户输入</span><p class="content">' + escapeHtml(turn.input) + '</p></div>' +
+            '<div class="message"><span class="role">模型输出</span><p class="content">' + escapeHtml(turn.output) + '</p></div>' +
+          '</div>';
+        }).join('') + '</div>';
+
+        for (const element of eventList.querySelectorAll('.conversation-turn')) {
+          element.addEventListener('click', () => {
+            state.selectedEventIndex = Number(element.dataset.index);
+            renderEvents();
+            renderDetail();
+          });
+        }
+
+        renderDetail();
+      }
+
+      function extractConversationTurns(events) {
+        return events
+          .map((event, index) => {
+            const input = getConversationInput(event);
+            const output = getConversationOutput(event);
+            if (!input || !output) {
+              return null;
+            }
+            return {
+              index,
+              sequence: event.sequence,
+              timestamp: event.timestamp,
+              input,
+              output,
+            };
+          })
+          .filter(Boolean);
+      }
+
+      function getConversationInput(event) {
+        if (event.phase !== 'session_turn') {
+          return null;
+        }
+        if (typeof event.input === 'object' && event.input !== null && typeof event.input.input === 'string') {
+          return event.input.input;
+        }
+        if (typeof event.input === 'string') {
+          return event.input;
+        }
+        return null;
+      }
+
+      function getConversationOutput(event) {
+        if (event.phase !== 'session_turn') {
+          return null;
+        }
+        if (typeof event.output === 'object' && event.output !== null && typeof event.output.finalAnswer === 'string') {
+          return event.output.finalAnswer;
+        }
+        if (typeof event.output === 'string') {
+          return event.output;
+        }
+        return null;
       }
 
       function matchesEventFilters(event) {
@@ -640,6 +934,15 @@ function renderAppHtml(): string {
         return nodes.flatMap((node) => [node, ...flattenEventTree(node.children ?? [])]);
       }
 
+      function flattenVisibleEventTree(nodes) {
+        return nodes.flatMap((node) => {
+          if (state.collapsedKeys.has(getNodeKey(node))) {
+            return [node];
+          }
+          return [node, ...flattenVisibleEventTree(node.children ?? [])];
+        });
+      }
+
       function renderEventTree(nodes, depth) {
         return nodes.map((node) => {
           const event = node.event;
@@ -650,24 +953,49 @@ function renderAppHtml(): string {
           const title = event.name
             ? event.name + (event.spanType ? ' [' + event.spanType + ']' : '')
             : (event.type ?? 'unknown');
-          const childrenHtml = (node.children && node.children.length > 0)
+          const nodeKey = getNodeKey(node);
+          const collapsed = state.collapsedKeys.has(nodeKey);
+          const hasChildren = node.children && node.children.length > 0;
+          const typeClass = sanitizeClassName(event.type ?? 'unknown');
+          const statusClass = sanitizeClassName(event.status ?? 'unknown');
+          const childrenHtml = hasChildren && !collapsed
             ? '<div class="event-children">' + renderEventTree(node.children, depth + 1) + '</div>'
             : '';
+          const childBadge = hasChildren
+            ? '<span class="badge">' + node.children.length + ' children</span>'
+            : '';
+          const toggle = hasChildren
+            ? '<button class="collapse-toggle" type="button" data-key="' + escapeHtml(nodeKey) + '" title="' + (collapsed ? '展开子事件' : '折叠子事件') + '">' + (collapsed ? '+' : '-') + '</button>'
+            : '<span class="collapse-toggle placeholder"></span>';
 
           return '<div>' +
-            '<div class="event-row ' + selected + '" data-index="' + node.index + '" style="margin-left:' + indent + 'px">' +
-              '<strong>#' + escapeHtml(String(sequence)) + ' ' + escapeHtml(title) + '</strong>' +
-              '<div class="event-meta">' +
-                '<span>' + escapeHtml(timestamp) + '</span>' +
-                (event.type ? '<span class="badge">' + escapeHtml(event.type) + '</span>' : '') +
-                (event.mode ? '<span class="badge">' + escapeHtml(event.mode) + '</span>' : '') +
-                (event.status ? '<span class="badge">' + escapeHtml(event.status) + '</span>' : '') +
-                (event.eventId ? '<span class="badge">id</span>' : '') +
+            '<div class="event-row ' + selected + ' depth-' + Math.min(depth, 5) + ' type-' + typeClass + ' status-' + statusClass + '" data-index="' + node.index + '" style="margin-left:' + indent + 'px">' +
+              toggle +
+              '<div class="event-main">' +
+                '<div class="event-title"><strong>#' + escapeHtml(String(sequence)) + ' ' + escapeHtml(title) + '</strong></div>' +
+                '<div class="event-meta">' +
+                  '<span>' + escapeHtml(timestamp) + '</span>' +
+                  (event.type ? '<span class="badge">' + escapeHtml(event.type) + '</span>' : '') +
+                  (event.mode ? '<span class="badge">' + escapeHtml(event.mode) + '</span>' : '') +
+                  (event.status ? '<span class="badge">' + escapeHtml(event.status) + '</span>' : '') +
+                  (event.eventId ? '<span class="badge">id</span>' : '') +
+                  childBadge +
+                '</div>' +
               '</div>' +
             '</div>' +
             childrenHtml +
           '</div>';
         }).join('');
+      }
+
+      function getNodeKey(node) {
+        return typeof node.event.eventId === 'string' && node.event.eventId
+          ? 'event:' + node.event.eventId
+          : 'index:' + node.index;
+      }
+
+      function sanitizeClassName(value) {
+        return String(value).toLowerCase().replace(/[^a-z0-9_-]+/g, '_');
       }
 
       function buildEventTree(events) {
@@ -718,6 +1046,16 @@ function renderAppHtml(): string {
           ? event.name + (event.spanType ? ' [' + event.spanType + ']' : '')
           : (event.type ?? 'unknown');
         detailLabel.textContent = title + ' #' + (event.sequence ?? '-');
+        if (state.view === 'conversation') {
+          const input = getConversationInput(event);
+          const output = getConversationOutput(event);
+          if (input && output) {
+            detailPanel.innerHTML =
+              '<div class="message"><span class="role">用户输入</span><p class="content">' + escapeHtml(input) + '</p></div>' +
+              '<div class="message"><span class="role">模型输出</span><p class="content">' + escapeHtml(output) + '</p></div>';
+            return;
+          }
+        }
         detailPanel.innerHTML = '<pre>' + escapeHtml(JSON.stringify(event, null, 2)) + '</pre>';
       }
 

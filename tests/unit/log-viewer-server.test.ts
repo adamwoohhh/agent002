@@ -7,6 +7,14 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { handleLogViewerRequest } from "../../src/tools/log-viewer/log-viewer-server.js";
 
+test("log viewer root page includes timeline collapse and conversation view controls", async () => {
+  const response = await invokeRawHandler("/", process.cwd());
+
+  assert.equal(response.statusCode, 200);
+  assert.match(response.body, /collapse-toggle/);
+  assert.match(response.body, /仅对话输入\/输出/);
+});
+
 test("log viewer server exposes file list and file detail", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "log-viewer-server-"));
   const logsDir = path.join(tempRoot, "logs");
@@ -57,6 +65,15 @@ test("log viewer server returns 404 for missing files and 400 for invalid paths"
 });
 
 async function invokeHandler(url: string, logDirectory: string): Promise<{ statusCode: number; body: any }> {
+  const response = await invokeRawHandler(url, logDirectory);
+
+  return {
+    statusCode: response.statusCode,
+    body: JSON.parse(response.body),
+  };
+}
+
+async function invokeRawHandler(url: string, logDirectory: string): Promise<{ statusCode: number; body: string }> {
   const request = {
     method: "GET",
     url,
@@ -67,7 +84,7 @@ async function invokeHandler(url: string, logDirectory: string): Promise<{ statu
 
   return {
     statusCode: response.statusCode,
-    body: JSON.parse(response.body),
+    body: response.body,
   };
 }
 
