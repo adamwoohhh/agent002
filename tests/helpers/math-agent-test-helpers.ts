@@ -1,4 +1,5 @@
 import { AgentChatService } from "../../src/application/agent/agent-chat-service.js";
+import { BillSkill } from "../../src/application/bill-agent/bill-skill.js";
 import { MathSkill } from "../../src/application/math-agent/math-skill.js";
 import type { MathConversationContext } from "../../src/application/math-agent/types.js";
 import { resolveAppConfig, type AppConfig } from "../../src/infrastructure/config/app-config.js";
@@ -100,6 +101,7 @@ export class MathChatSession {
   constructor(provider: MathModelProvider, config: AppConfig = resolveAppConfig()) {
     const registry = new SkillRegistry();
     registry.register(new MathSkill(config, provider));
+    registry.register(new BillSkill(config, provider));
     this.service = new AgentChatService(config, provider, registry, new SkillRouter());
   }
 

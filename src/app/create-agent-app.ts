@@ -3,6 +3,7 @@ import { createMathModelProvider } from "../infrastructure/llm/provider-factory.
 import { createTelemetryWriter } from "../infrastructure/observability/create-telemetry-writer.js";
 import { AgentChatService } from "../application/agent/agent-chat-service.js";
 import { MathSkill } from "../application/math-agent/math-skill.js";
+import { BillSkill } from "../application/bill-agent/bill-skill.js";
 import { SkillRegistry } from "../platform/runtime/skill.js";
 import { SkillRouter } from "../platform/runtime/skill-router.js";
 import { AgentRuntime } from "../platform/runtime/agent-runtime.js";
@@ -32,6 +33,7 @@ export function createAgentApp(config: AppConfig): AgentApp {
       const logger = await createTelemetryWriter("agx-run", config);
       const registry = new SkillRegistry();
       registry.register(new MathSkill(config, provider, logger));
+      registry.register(new BillSkill(config, provider, logger));
       const runtime = new AgentRuntime(registry, router, undefined, undefined, logger);
       const result = await runtime.execute(input);
       await logger.flush?.();
@@ -42,6 +44,7 @@ export function createAgentApp(config: AppConfig): AgentApp {
     createSession(): AgentSession {
       const registry = new SkillRegistry();
       registry.register(new MathSkill(config, provider));
+      registry.register(new BillSkill(config, provider));
       return new AgentChatService(config, provider, registry, router);
     },
   }; 

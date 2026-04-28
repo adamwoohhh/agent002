@@ -25,6 +25,21 @@ export class SkillRouter {
     }
 
     const mathSkill = skills.find((skill) => skill.id === "math");
+    if (mathSkill && isExplicitArithmeticRequest(input)) {
+      return {
+        kind: "route",
+        skillId: mathSkill.id,
+      };
+    }
+
+    const billSkill = skills.find((skill) => skill.id === "bill");
+    if (billSkill && isLikelyBillRequest(input)) {
+      return {
+        kind: "route",
+        skillId: billSkill.id,
+      };
+    }
+
     if (mathSkill && isLikelyMathRequest(input)) {
       return {
         kind: "route",
@@ -34,9 +49,26 @@ export class SkillRouter {
 
     return {
       kind: "reject",
-      message: "当前 agent 暂时只内置数学计算 skill，支持两个数字的一次加减乘除。",
+      message: "当前 agent 目前支持基础数学计算和多人账单结算。",
     };
   }
+}
+
+export function isLikelyBillRequest(input: string): boolean {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  if (/(账单|AA|分摊|谁该给谁|付了|花了|买了.*午饭|买了.*早饭|先付了|出去玩|吃饭)/.test(trimmed)) {
+    return true;
+  }
+
+  return /(我们|大家|三个人|两个人).*(花了|出去玩|吃饭)/.test(trimmed);
+}
+
+function isExplicitArithmeticRequest(input: string): boolean {
+  return /(\d|[零一二三四五六七八九十百千万两半])[^\n]{0,12}(加|减|乘|除|plus|minus|times|divide)/i.test(input.trim());
 }
 
 export function isLikelyMathRequest(input: string): boolean {

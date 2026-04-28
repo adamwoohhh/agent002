@@ -377,6 +377,73 @@ test("chat session asks for clarification and uses the follow-up answer", async 
   ]);
 });
 
+test("chat session keeps clarification follow-ups on the active skill even when turn classification model drifts", async () => {
+  const provider = new StubProvider(({ messages, tools }) => {
+    const userMessage = messages.at(-1)?.content ?? "";
+    const systemMessage = messages[0]?.content ?? "";
+    const currentInput = extractCurrentInputFromPrompt(userMessage);
+    const isTurnModeCall = systemMessage.includes("对话路由助手");
+
+    if (tools && currentInput === "冰箱里有10个苹果,小明吃了3个,小花也吃了,冰箱里还剩下几个苹果?") {
+      return {
+        text: "CLARIFY: 你需要明确小花吃了几个苹果？",
+      };
+    }
+
+    if (tools && currentInput === "小花吃了三个麦乐鸡,5块吮指原味鸡,6个苹果派,12杯无糖可乐") {
+      assert.match(userMessage, /当前待解决问题：冰箱里还剩下几个苹果/);
+      assert.match(userMessage, /本轮输入类型：补充信息/);
+      assert.match(userMessage, /上一轮澄清问题：你需要明确小花吃了几个苹果？/);
+      return {
+        text: "CLARIFY: 你需要明确小花吃了几个苹果？",
+      };
+    }
+
+    if (!tools) {
+      if (isTurnModeCall) {
+        return {
+          text:
+            currentInput === "冰箱里有10个苹果,小明吃了3个,小花也吃了,冰箱里还剩下几个苹果?"
+              ? "NEW_REQUEST"
+              : "NEW_REQUEST",
+        };
+      }
+
+      return {
+        text: "你需要明确小花吃了几个苹果？",
+      };
+    }
+
+    throw new Error(`unexpected input: ${userMessage}`);
+  });
+
+  const session = new MathChatSession(provider);
+
+  const clarification = await session.respond("冰箱里有10个苹果，小明吃了3个，小花也吃了，冰箱里还剩下几个苹果？");
+  const followUp = await session.respond("小花吃了三个麦乐鸡，5块吮指原味鸡，6个苹果派，12杯无糖可乐");
+
+  assert.equal(clarification, "你需要明确小花吃了几个苹果？");
+  assert.equal(followUp, "你需要明确小花吃了几个苹果？");
+  assert.deepEqual(session.getHistory(), [
+    {
+      role: "user",
+      content: "冰箱里有10个苹果，小明吃了3个，小花也吃了，冰箱里还剩下几个苹果？",
+    },
+    {
+      role: "assistant",
+      content: "你需要明确小花吃了几个苹果？",
+    },
+    {
+      role: "user",
+      content: "小花吃了三个麦乐鸡，5块吮指原味鸡，6个苹果派，12杯无糖可乐",
+    },
+    {
+      role: "assistant",
+      content: "你需要明确小花吃了几个苹果？",
+    },
+  ]);
+});
+
 test("chat session keeps pending question and fact memory across multiple clarifications", async () => {
   const observedPrompts: string[] = [];
   const session = new MathChatSession(
