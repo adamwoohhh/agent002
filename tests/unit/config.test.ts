@@ -10,7 +10,7 @@ test("cli flags override AGX env vars without polluting user input", () => {
     const parsed = applyCliOverrides([
       "--provider=http",
       "--model",
-      "demo-model",
+      "sample-model",
       "--http-timeout-ms=12345",
       "请帮我算一下",
       "18",
@@ -19,7 +19,7 @@ test("cli flags override AGX env vars without polluting user input", () => {
     ]);
 
     assert.equal(process.env.AGX_PROVIDER, "http");
-    assert.equal(process.env.AGX_MODEL, "demo-model");
+    assert.equal(process.env.AGX_MODEL, "sample-model");
     assert.equal(process.env.AGX_HTTP_TIMEOUT_MS, "12345");
     assert.equal(parsed.input, "请帮我算一下 18 除以 3");
   } finally {

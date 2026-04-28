@@ -156,8 +156,8 @@ test("FornaxTelemetryWriter maps event tree into nested spans and records usage"
   const started: FakeSpan[] = [];
   const tracer = createFakeTracer(started);
   const config = resolveAppConfig({
-    FORNAX_AK: "ak-demo",
-    FORNAX_SK: "sk-demo",
+    FORNAX_AK: "ak-test",
+    FORNAX_SK: "sk-test",
   });
   const writer = new FornaxTelemetryWriter("run-1", config, tracer as unknown as FornaxTracerLike);
 

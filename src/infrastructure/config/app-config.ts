@@ -57,7 +57,7 @@ export function resolveAppConfig(
     observability: {
       fornaxAk: mergedEnv.FORNAX_AK?.trim() || undefined,
       fornaxSk: mergedEnv.FORNAX_SK?.trim() || undefined,
-      fornaxAppName: mergedEnv.FORNAX_APP_NAME?.trim() || "langgraph-ts-demo",
+      fornaxAppName: mergedEnv.FORNAX_APP_NAME?.trim() || "math-master",
       fornaxProcessor: parseFornaxProcessor(mergedEnv.FORNAX_PROCESSOR),
       fornaxRecordInputs: parseBooleanEnv(mergedEnv.FORNAX_RECORD_INPUTS, true),
       fornaxRecordOutputs: parseBooleanEnv(mergedEnv.FORNAX_RECORD_OUTPUTS, true),

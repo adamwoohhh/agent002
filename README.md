@@ -1,10 +1,10 @@
-# LangGraph TypeScript Demo
+# math-master
 
-这是一个用 LangGraph Graph API 实现的最小“数学计算 agent”示例。
+math-master 是一个面向日常自然语言计算的正式数学工具。它基于 LangGraph Graph API 构建，将模型理解、工具选择、领域运算、答案渲染和运行时观测拆成清晰的工程模块。
 
 它接受自然语言输入，通过可切换的 provider 接入模型服务，让 LLM 在 4 个数学工具里选择合适的一个，再返回加减乘除的计算结果。
 
-现在它除了直接计算算式，也支持：
+除了直接计算算式，它也支持：
 
 - 结合多轮对话历史继续计算
 - 从生活情境里提取数字和运算关系
@@ -25,7 +25,7 @@ npm run dev -- "请帮我算一下 12 加 8"
 
 默认会从项目根目录的 `.env.local` 读取配置。
 
-`.env.local` 示例：
+`.env.local` 配置模板：
 
 ```bash
 AGX_PROVIDER=openai
@@ -47,12 +47,12 @@ Provider 切换：
   - 如果配置了 `AGX_BASE_URL`，会一起用于兼容服务
 - `AGX_PROVIDER=http`
   - 使用 `fetch` 直接请求 HTTP 模型服务
-  - 示例按 OpenAI 兼容的 `chat/completions` 接口编写
+  - 按 OpenAI 兼容的 `chat/completions` 接口编写
   - 可配置 `AGX_HTTP_URL`、`AGX_HTTP_API_KEY`、`AGX_HTTP_MODEL`
   - 如果没有单独传 `AGX_HTTP_API_KEY`，会回退到 `AGX_API_KEY`
   - 如果没有单独传 `AGX_HTTP_URL`，会优先根据 `AGX_BASE_URL` 自动拼出 `chat/completions` 地址
 
-`http` provider 示例环境变量：
+`http` provider 环境变量：
 
 ```bash
 AGX_PROVIDER=http
@@ -90,7 +90,7 @@ npm run dev -- "请帮我算一下 18 除以 3"
 npm run dev
 ```
 
-示例：
+交互式会话：
 
 ```text
 你> 12 加 8
@@ -148,7 +148,7 @@ AGX_ENABLE_LLM_EVALS=1 npm run eval
 
 ## 当前架构
 
-项目已经从单文件 demo 重构成分层结构：
+math-master 采用分层结构：
 
 - `src/app/`
   - 应用入口与 CLI
@@ -166,7 +166,7 @@ AGX_ENABLE_LLM_EVALS=1 npm run eval
   - 通用 agent runtime 骨架
   - 提供 `SkillRegistry`、`SkillRouter`、`AgentRuntime`、`ExecutionPolicy`、`TaskManager`
 
-这次重构的目标不是一步变成完整的通用 coding agent，而是先把“单领域 agent”拆清楚，同时为后续平台化能力预留接口。
+这个结构把“单领域数学工具”拆成可维护、可观测、可扩展的模块，同时为后续平台化能力预留接口。
 
 ## Graph 结构
 
@@ -241,6 +241,26 @@ START -> normalizeInput -> decideIntent -> executeOperation -> renderAnswer -> E
 
 ## 支持范围
 
+当前版本聚焦可靠的基础计算，只支持：
+
+- 两个数字
+- 一次运算
+- 加、减、乘、除
+- 基于对话历史续算上一轮结果
+- 从简单情境里抽取两个数字做一次运算
+- 信息缺失时先追问一轮
+
+例如：
+
+- `12 加 8`
+- `50 减 6`
+- `7 * 9`
+- `20 / 5`
+- `结果再乘 2`
+- `上一次结果除以 4`
+- `冰箱里有 3 个苹果，早上我吃了 1 个，还剩下几个苹果`
+- `冰箱里有 3 个苹果，早上我吃了苹果，还剩下几个苹果`
+
 ## 日志查看器
 
 项目内置了一个本地日志 Web Viewer，用来查看 `logs/*.jsonl` 运行日志。
@@ -266,29 +286,9 @@ npm run log:view -- --port=3789 --log-dir=./logs
 
 当前日志查看器只读，不会修改或删除本地日志文件，也暂不支持实时 tail。
 
-当前示例故意保持简单，只支持：
-
-- 两个数字
-- 一次运算
-- 加、减、乘、除
-- 基于对话历史续算上一轮结果
-- 从简单情境里抽取两个数字做一次运算
-- 信息缺失时先追问一轮
-
-例如：
-
-- `12 加 8`
-- `50 减 6`
-- `7 * 9`
-- `20 / 5`
-- `结果再乘 2`
-- `上一次结果除以 4`
-- `冰箱里有 3 个苹果，早上我吃了 1 个，还剩下几个苹果`
-- `冰箱里有 3 个苹果，早上我吃了苹果，还剩下几个苹果`
-
 ## 下一步可以怎么扩展
 
-如果你想把它继续升级成真正的 agent，可以继续做这些事：
+后续可以继续扩展这些能力：
 
 1. 增加条件边，区分成功、无法识别、模型异常
 2. 支持多步表达式，比如“先加再乘”

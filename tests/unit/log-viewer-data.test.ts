@@ -14,17 +14,17 @@ import {
 test("parseJsonlContent parses valid events and builds summary", () => {
   const parsed = parseJsonlContent(
     [
-      '{"sequence":0,"type":"run_started","timestamp":"2026-04-22T07:57:10.549Z","runId":"demo-run"}',
+      '{"sequence":0,"type":"run_started","timestamp":"2026-04-22T07:57:10.549Z","runId":"sample-run"}',
       "",
       '{"sequence":1,"type":"graph_event","timestamp":"2026-04-22T07:57:11.000Z","mode":"tasks"}',
-      '{"sequence":2,"type":"run_completed","timestamp":"2026-04-22T07:57:12.000Z","runId":"demo-run"}',
+      '{"sequence":2,"type":"run_completed","timestamp":"2026-04-22T07:57:12.000Z","runId":"sample-run"}',
     ].join("\n"),
-    "agx-run-demo.jsonl",
+    "agx-run-sample.jsonl",
   );
 
   assert.equal(parsed.events.length, 3);
   assert.equal(parsed.parseErrors.length, 0);
-  assert.equal(parsed.summary.runId, "demo-run");
+  assert.equal(parsed.summary.runId, "sample-run");
   assert.equal(parsed.summary.kind, "run");
   assert.equal(parsed.summary.totalEvents, 3);
   assert.equal(parsed.summary.startedAt, "2026-04-22T07:57:10.549Z");
@@ -55,11 +55,11 @@ test("buildEventTree nests child events under parent event ids", () => {
 test("parseJsonlContent keeps going when a line is malformed", () => {
   const parsed = parseJsonlContent(
     [
-      '{"sequence":0,"type":"run_started","timestamp":"2026-04-22T07:57:10.549Z","runId":"demo-run"}',
+      '{"sequence":0,"type":"run_started","timestamp":"2026-04-22T07:57:10.549Z","runId":"sample-run"}',
       "{bad json",
-      '{"sequence":2,"type":"run_completed","timestamp":"2026-04-22T07:57:12.000Z","runId":"demo-run"}',
+      '{"sequence":2,"type":"run_completed","timestamp":"2026-04-22T07:57:12.000Z","runId":"sample-run"}',
     ].join("\n"),
-    "agx-run-demo.jsonl",
+    "agx-run-sample.jsonl",
   );
 
   assert.equal(parsed.events.length, 2);
@@ -70,11 +70,11 @@ test("parseJsonlContent keeps going when a line is malformed", () => {
 test("parseJsonlContent normalizes span_event jsonl into viewer events", () => {
   const parsed = parseJsonlContent(
     [
-      '{"sequence":0,"recordType":"span_event","stage":"start","timestamp":"2026-04-22T07:57:10.549Z","runId":"demo-run","spanId":"root","name":"agent_run","spanType":"agent","status":"open","type":"run_started"}',
-      '{"sequence":1,"recordType":"span_event","stage":"instant","timestamp":"2026-04-22T07:57:11.000Z","runId":"demo-run","spanId":"graph-1","parentSpanId":"root","name":"graph:decideIntent","spanType":"agent","status":"completed","type":"graph_event"}',
-      '{"sequence":2,"recordType":"span_event","stage":"end","timestamp":"2026-04-22T07:57:12.000Z","runId":"demo-run","spanId":"root","name":"agent_run","spanType":"agent","status":"completed","type":"run_completed","output":{"finalAnswer":"20"}}',
+      '{"sequence":0,"recordType":"span_event","stage":"start","timestamp":"2026-04-22T07:57:10.549Z","runId":"sample-run","spanId":"root","name":"agent_run","spanType":"agent","status":"open","type":"run_started"}',
+      '{"sequence":1,"recordType":"span_event","stage":"instant","timestamp":"2026-04-22T07:57:11.000Z","runId":"sample-run","spanId":"graph-1","parentSpanId":"root","name":"graph:decideIntent","spanType":"agent","status":"completed","type":"graph_event"}',
+      '{"sequence":2,"recordType":"span_event","stage":"end","timestamp":"2026-04-22T07:57:12.000Z","runId":"sample-run","spanId":"root","name":"agent_run","spanType":"agent","status":"completed","type":"run_completed","output":{"finalAnswer":"20"}}',
     ].join("\n"),
-    "agx-run-demo.jsonl",
+    "agx-run-sample.jsonl",
   );
 
   assert.equal(parsed.events.length, 2);
@@ -93,17 +93,17 @@ test("listLogFiles returns jsonl files with metadata and event counts", async ()
   try {
     await mkdir(logsDir);
     await writeFile(
-      path.join(logsDir, "agx-run-demo.jsonl"),
-      '{"sequence":0,"type":"run_started","timestamp":"2026-04-22T07:57:10.549Z","runId":"demo-run"}\n',
+      path.join(logsDir, "agx-run-sample.jsonl"),
+      '{"sequence":0,"type":"run_started","timestamp":"2026-04-22T07:57:10.549Z","runId":"sample-run"}\n',
       "utf8",
     );
 
     const files = await listLogFiles(logsDir);
     assert.equal(files.length, 1);
-    assert.equal(files[0]?.name, "agx-run-demo.jsonl");
+    assert.equal(files[0]?.name, "agx-run-sample.jsonl");
     assert.equal(files[0]?.kind, "run");
     assert.equal(files[0]?.eventCount, 1);
-    assert.equal(files[0]?.path, path.join(logsDir, "agx-run-demo.jsonl"));
+    assert.equal(files[0]?.path, path.join(logsDir, "agx-run-sample.jsonl"));
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
@@ -112,7 +112,7 @@ test("listLogFiles returns jsonl files with metadata and event counts", async ()
 test("resolveLogFilePath rejects path traversal", () => {
   const logDir = path.resolve("/tmp/example-logs");
 
-  assert.equal(resolveLogFilePath(logDir, "agx-run-demo.jsonl"), path.join(logDir, "agx-run-demo.jsonl"));
+  assert.equal(resolveLogFilePath(logDir, "agx-run-sample.jsonl"), path.join(logDir, "agx-run-sample.jsonl"));
   assert.equal(resolveLogFilePath(logDir, "../secrets.txt"), null);
   assert.equal(resolveLogFilePath(logDir, "nested/file.jsonl"), null);
 });

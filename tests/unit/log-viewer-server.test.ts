@@ -20,11 +20,11 @@ test("log viewer server exposes file list and file detail", async () => {
   const logsDir = path.join(tempRoot, "logs");
   await mkdir(logsDir);
 
-  const fileName = "agx-run-demo.jsonl";
+  const fileName = "agx-run-sample.jsonl";
   await writeFile(
     path.join(logsDir, fileName),
     [
-      '{"sequence":0,"type":"run_started","timestamp":"2026-04-22T07:57:10.549Z","runId":"demo-run","eventId":"root"}',
+      '{"sequence":0,"type":"run_started","timestamp":"2026-04-22T07:57:10.549Z","runId":"sample-run","eventId":"root"}',
       '{"sequence":1,"type":"session_event","timestamp":"2026-04-22T07:57:11.000Z","event":"graph_execution","eventId":"session-1","parentEventId":"root"}',
       '{"sequence":2,"type":"graph_event","timestamp":"2026-04-22T07:57:12.000Z","event":"node_execution","eventId":"graph-1","parentEventId":"session-1"}',
     ].join("\n"),
@@ -39,7 +39,7 @@ test("log viewer server exposes file list and file detail", async () => {
 
     const detailResponse = await invokeHandler(`/api/log-files/${encodeURIComponent(fileName)}`, logsDir);
     assert.equal(detailResponse.statusCode, 200);
-    assert.equal(detailResponse.body.summary.runId, "demo-run");
+    assert.equal(detailResponse.body.summary.runId, "sample-run");
     assert.equal(detailResponse.body.events.length, 3);
     assert.equal(detailResponse.body.eventTree.length, 1);
     assert.equal(detailResponse.body.eventTree[0].children.length, 1);
