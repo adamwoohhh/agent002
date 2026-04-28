@@ -84,3 +84,6 @@ docs/curl/
 .claude/settings.local.json
 .trae
 .coco
+
+# Local git worktrees
+.worktrees/
