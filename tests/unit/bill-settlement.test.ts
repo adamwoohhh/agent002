@@ -114,6 +114,10 @@ test("bill conversation state manager accumulates participants and records", asy
 
   let state = createEmptyBillConversationState();
   ({ state } = await manager.beginTurn(state, "我和小明、小花出去玩了，我们都花了一些钱，现在要算一下帐", "new_request"));
+  assert.deepEqual(state.participants, []);
+  assert.deepEqual(state.participantConfirmation?.candidates, ["我", "小明", "小花"]);
+
+  ({ state } = await manager.beginTurn(state, "确认，里面的我就是我本人，也参与分摊", "supplement"));
   assert.deepEqual(state.participants, ["我", "小明", "小花"]);
 
   ({ state } = await manager.beginTurn(state, "早上我给我们三个人买了早饭，花了30元", "supplement"));

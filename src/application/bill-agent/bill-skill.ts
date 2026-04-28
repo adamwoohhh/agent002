@@ -5,6 +5,7 @@ import type { AgentSkill, SkillDescriptor, SkillResult } from "../../platform/ru
 import type { RunContext } from "../../platform/runtime/types.js";
 import type { AgentTurnMode } from "../agent/types.js";
 import { computeBillSettlement, formatBillSettlement } from "../../domain/bill/settlement.js";
+import type { BillFactRecord } from "../../domain/bill/types.js";
 import { BillSkillStateManager, createEmptyBillConversationState } from "./conversation/state-manager.js";
 import { executeBillGraph } from "./graph/bill-agent-graph.js";
 import type { BillConversationContext, BillSkillState } from "./types.js";
@@ -61,7 +62,72 @@ export class BillSkill implements AgentSkill {
     let shouldKeepDraft = Boolean(preparedState.pendingExpenseDraft);
     let updatedState: BillSkillState = preparedState;
 
-    if (analysis.clarificationQuestion) {
+    if (currentState.pendingSettlementConfirmation && isAffirmativeConfirmation(input)) {
+      const summary = computeBillSettlement(
+        currentState.pendingSettlementConfirmation.records,
+        currentState.pendingSettlementConfirmation.participants,
+      );
+      output = formatBillSettlement(summary);
+      updatedState = {
+        ...preparedState,
+        pendingSettlementConfirmation: null,
+        awaitingSettlementConfirmation: false,
+        lastSettlementSummary: summary,
+      };
+      settled = true;
+      shouldKeepDraft = false;
+    } else if (currentState.pendingSettlementConfirmation && isNegativeConfirmation(input)) {
+      output = "好的，先不结算。请告诉我要修改哪一笔账单或参与人。";
+      status = "clarify";
+      updatedState = {
+        ...preparedState,
+        pendingSettlementConfirmation: null,
+        awaitingSettlementConfirmation: false,
+      };
+    } else if (preparedState.participantConfirmation) {
+      const names = preparedState.participantConfirmation.candidates.join("、");
+      const includesSelf = preparedState.participantConfirmation.candidates.includes("我");
+      output = includesSelf
+        ? `我识别到参与人：${names}。这里的“我”是否代表你本人，并且你也参与本次分摊？请确认参与人名单是否正确。`
+        : `我识别到参与人：${names}。请确认参与人名单是否正确。`;
+      status = "clarify";
+      updatedState = {
+        ...preparedState,
+        awaitingSettlementConfirmation: false,
+      };
+    } else if (currentState.pendingParticipantReview && !preparedState.pendingParticipantReview) {
+      const added = preparedState.participants.includes(currentState.pendingParticipantReview.name);
+      const committedCount = preparedState.records.length - currentState.records.length;
+      output = added
+        ? `已加入参与人：${currentState.pendingParticipantReview.name}。已记下${committedCount}笔账单。还有其他人付了钱吗？如果都补充完了，请直接告诉我“没有其他支付事件了”或“开始结算”。`
+        : `好的，未加入${currentState.pendingParticipantReview.name}。请补充这笔账单正确的付款人和分摊人。`;
+      status = "clarify";
+      shouldKeepDraft = Boolean(preparedState.pendingExpenseDraft);
+      updatedState = {
+        ...preparedState,
+        awaitingSettlementConfirmation: added && committedCount > 0,
+      };
+    } else if (preparedState.pendingParticipantReview) {
+      output = `我识别到“${preparedState.pendingParticipantReview.name}”不在当前参与人中。是否要把他加入本次账单参与人？确认后我再记录这笔账单。`;
+      status = "clarify";
+      updatedState = {
+        ...preparedState,
+        awaitingSettlementConfirmation: false,
+      };
+    } else if (currentState.participantConfirmation && !preparedState.participantConfirmation) {
+      const committedCount = preparedState.records.length - currentState.records.length;
+      output = `已确认参与人：${preparedState.participants.join("、")}。${
+        committedCount > 0
+          ? `已记下${committedCount}笔账单。还有其他人付了钱吗？如果都补充完了，请直接告诉我“没有其他支付事件了”或“开始结算”。`
+          : "请继续告诉我每笔谁付了多少钱、这笔钱由哪些人分摊。"
+      }`;
+      status = "clarify";
+      shouldKeepDraft = Boolean(preparedState.pendingExpenseDraft);
+      updatedState = {
+        ...preparedState,
+        awaitingSettlementConfirmation: committedCount > 0,
+      };
+    } else if (analysis.clarificationQuestion) {
       output = analysis.clarificationQuestion;
       status = "clarify";
       updatedState = {
@@ -84,8 +150,13 @@ export class BillSkill implements AgentSkill {
           awaitingSettlementConfirmation: false,
         };
       } else {
-        const summary = computeBillSettlement(preparedState.records, preparedState.participants);
-        output = formatBillSettlement(summary);
+        output = [
+          "请确认以下结构化账单数据，确认无误后我再开始结算：",
+          "```json",
+          formatStructuredLedger(preparedState.participants, preparedState.records),
+          "```",
+          "如果无误，请回复“确认无误，开始结算”；如果需要修改，请告诉我要改哪里。",
+        ].join("\n");
         await executeBillGraph({
           config: this.config,
           logger: activeLogger,
@@ -99,10 +170,12 @@ export class BillSkill implements AgentSkill {
         });
         updatedState = {
           ...preparedState,
+          pendingSettlementConfirmation: {
+            participants: preparedState.participants,
+            records: preparedState.records,
+          },
           awaitingSettlementConfirmation: false,
-          lastSettlementSummary: summary,
         };
-        settled = true;
         shouldKeepDraft = false;
       }
     } else if (preparedState.records.length > currentState.records.length) {
@@ -156,6 +229,9 @@ function hydrateBillSkillState(skillState?: Partial<BillSkillState>): BillSkillS
     ...skillState,
     participants: Array.isArray(skillState?.participants) ? skillState.participants : [],
     records: Array.isArray(skillState?.records) ? skillState.records : [],
+    participantConfirmation: skillState?.participantConfirmation ?? null,
+    pendingParticipantReview: skillState?.pendingParticipantReview ?? null,
+    pendingSettlementConfirmation: skillState?.pendingSettlementConfirmation ?? null,
     awaitingSettlementConfirmation: skillState?.awaitingSettlementConfirmation === true,
   };
 }
@@ -174,6 +250,18 @@ function buildDraftReminder(missingFields: Array<"payer" | "amount" | "beneficia
   }
 
   return "请补充这笔账单的关键信息。";
+}
+
+function formatStructuredLedger(participants: string[], records: BillFactRecord[]): string {
+  return JSON.stringify({ participants, records }, null, 2);
+}
+
+function isAffirmativeConfirmation(input: string): boolean {
+  return /(确认|对|是的|没错|正确|可以|无误|开始结算)/.test(input) && !/(不对|不是|否|别|不要|先不)/.test(input);
+}
+
+function isNegativeConfirmation(input: string): boolean {
+  return /(不对|不是|否|不要|别|先不|需要修改|要改)/.test(input);
 }
 const noopTelemetryWriter: TelemetryWriter = {
   runId: "noop-run",

@@ -21,6 +21,9 @@ export function createEmptyBillConversationState(): BillSkillState {
     participants: [],
     records: [],
     pendingExpenseDraft: null,
+    participantConfirmation: null,
+    pendingParticipantReview: null,
+    pendingSettlementConfirmation: null,
     awaitingSettlementConfirmation: false,
     lastClarificationQuestion: null,
     lastSettlementSummary: null,
@@ -57,14 +60,97 @@ export class BillSkillStateManager {
       turnMode,
     }, input);
 
+    if (state.participantConfirmation && isAffirmativeConfirmation(input)) {
+      return {
+        analysis,
+        state: {
+          ...state,
+          pendingQuestion: analysis.pendingQuestion || state.pendingQuestion,
+          participants: state.participantConfirmation.candidates,
+          records: mergeRecords(state.records, state.participantConfirmation.heldRecords),
+          pendingExpenseDraft: state.participantConfirmation.heldDraft,
+          participantConfirmation: null,
+        },
+      };
+    }
+
+    if (state.pendingParticipantReview) {
+      if (isAffirmativeConfirmation(input)) {
+        return {
+          analysis,
+          state: {
+            ...state,
+            pendingQuestion: analysis.pendingQuestion || state.pendingQuestion,
+            participants: mergeNames(state.participants, [state.pendingParticipantReview.name]),
+            records: mergeRecords(state.records, state.pendingParticipantReview.heldRecords),
+            pendingExpenseDraft: state.pendingParticipantReview.heldDraft,
+            pendingParticipantReview: null,
+          },
+        };
+      }
+
+      if (isNegativeConfirmation(input)) {
+        return {
+          analysis,
+          state: {
+            ...state,
+            pendingQuestion: analysis.pendingQuestion || state.pendingQuestion,
+            pendingExpenseDraft: state.pendingParticipantReview.heldDraft,
+            pendingParticipantReview: null,
+          },
+        };
+      }
+    }
+
     const shouldFreezeRecords = state.awaitingSettlementConfirmation && analysis.settlementRequested;
+
+    if (!state.participantConfirmation && state.participants.length === 0 && analysis.participants.length > 0) {
+      return {
+        analysis,
+        state: {
+          ...state,
+          pendingQuestion: analysis.pendingQuestion || state.pendingQuestion,
+          participantConfirmation: {
+            candidates: analysis.participants,
+            heldRecords: analysis.records,
+            heldDraft: analysis.pendingExpenseDraft,
+            sourceText: input,
+          },
+          pendingExpenseDraft: null,
+        },
+      };
+    }
+
+    if (state.participants.length > 0 && analysis.records.length > 0 && !shouldFreezeRecords) {
+      const { safe, blocked, unknownName } = splitRecordsByKnownParticipants(analysis.records, state.participants);
+      if (blocked.length > 0 && unknownName) {
+        return {
+          analysis,
+          state: {
+            ...state,
+            pendingQuestion: analysis.pendingQuestion || state.pendingQuestion,
+            participants: state.participants,
+            records: mergeRecords(state.records, safe),
+            pendingExpenseDraft: null,
+            pendingParticipantReview: {
+              name: unknownName,
+              heldRecords: blocked,
+              heldDraft: analysis.pendingExpenseDraft,
+              sourceText: input,
+            },
+          },
+        };
+      }
+    }
 
     return {
       analysis,
       state: {
         ...state,
         pendingQuestion: analysis.pendingQuestion || state.pendingQuestion,
-        participants: mergeNames(state.participants.filter(isConcreteParticipantName), analysis.participants),
+        participants: state.participants.length > 0
+          ? state.participants
+          : mergeNames(state.participants.filter(isConcreteParticipantName), analysis.participants),
         records: shouldFreezeRecords ? state.records : mergeRecords(state.records, analysis.records),
         pendingExpenseDraft: analysis.pendingExpenseDraft,
       },
@@ -377,6 +463,38 @@ function mergeRecords(existing: BillFactRecord[], incoming: BillFactRecord[]): B
   }
 
   return merged;
+}
+
+function isAffirmativeConfirmation(input: string): boolean {
+  return /(确认|对|是的|没错|正确|可以|是我本人|我本人|参与分摊)/.test(input) && !/(不对|不是|否|别|不要)/.test(input);
+}
+
+function isNegativeConfirmation(input: string): boolean {
+  return /(不对|不是|否|不要|别加|不加入)/.test(input);
+}
+
+function findUnknownParticipant(record: BillFactRecord, confirmedParticipants: string[]): string | null {
+  const confirmed = new Set(confirmedParticipants);
+  const names = [record.payer, ...record.beneficiaries];
+  return names.find((name) => !confirmed.has(name)) ?? null;
+}
+
+function splitRecordsByKnownParticipants(records: BillFactRecord[], confirmedParticipants: string[]) {
+  const safe: BillFactRecord[] = [];
+  const blocked: BillFactRecord[] = [];
+  let unknownName: string | null = null;
+
+  for (const record of records) {
+    const unknown = findUnknownParticipant(record, confirmedParticipants);
+    if (unknown) {
+      unknownName ??= unknown;
+      blocked.push(record);
+    } else {
+      safe.push(record);
+    }
+  }
+
+  return { safe, blocked, unknownName };
 }
 
 function normalizeBillAnalysis(
